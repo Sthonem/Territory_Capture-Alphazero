@@ -1,0 +1,86 @@
+# Territory Capture with AlphaZero
+
+This project implements the first phase of an AI course project: a small two-player board game environment that is designed to be extended later with an AlphaZero-style agent.
+
+## Game Overview
+
+Territory Capture is a turn-based strategy game played on a 5x5 board by two players, `X` and `O`.
+
+- Players take turns placing stones on empty cells.
+- Each player places exactly 8 stones.
+- The game always lasts 16 total moves.
+- After all stones are placed, the remaining 9 empty cells are scored as territory.
+
+## Rules
+
+1. The board size is 5x5.
+2. Player `X` moves first.
+3. Players alternate turns.
+4. A move consists of placing one stone on an empty cell.
+5. Each player may place at most 8 stones.
+6. The game ends after both players have placed 8 stones.
+7. Territory is evaluated only after the game ends.
+8. For each empty cell, inspect all 8 neighboring positions around it, including diagonals.
+9. Count only neighboring stones that were actually placed on the board.
+10. If neighboring `X` stones are greater than neighboring `O` stones, that empty cell is territory for `X`.
+11. If neighboring `O` stones are greater than neighboring `X` stones, that empty cell is territory for `O`.
+12. If the counts are equal, the empty cell is neutral.
+13. Territory evaluation is simultaneous: empty cells never influence the score of other empty cells.
+14. Final score is based only on territory cells, not on stones placed.
+15. The player with the higher territory score wins. Equal scores produce a draw.
+
+## Project Structure
+
+```text
+territory-capture/
+  README.md
+  requirements.txt
+  src/
+    __init__.py
+    game.py
+    rules.py
+    utils.py
+    demo.py
+    gui.py
+  tests/
+    test_game.py
+    test_rules.py
+```
+
+## Running the Demo
+
+From the project root:
+
+```bash
+python -m src.demo
+```
+
+This runs one or more random games, prints board states, and shows the final territory scores.
+
+## Playing the Game Yourself
+
+From the project root:
+
+```bash
+python -m src.gui
+```
+
+This opens a local desktop window where two human players can take turns by clicking on cells.
+
+## Running the Tests
+
+From the project root:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+## Extension Plan
+
+This version includes only the game environment and tests. A later phase can build AlphaZero components on top of this codebase, such as:
+
+- state encoding for neural network input
+- action masking for legal moves
+- self-play data generation
+- Monte Carlo Tree Search (MCTS)
+- a policy/value neural network
