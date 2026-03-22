@@ -52,6 +52,26 @@ class TerritoryCaptureGame:
 
         return [row[:] for row in self.board]
 
+    def clone(self) -> "TerritoryCaptureGame":
+        """Return an independent copy of the current game state.
+
+        This keeps the environment easy to use for future search-based agents
+        such as MCTS, where many hypothetical game states must be explored
+        without mutating the original game.
+        """
+
+        cloned_game = TerritoryCaptureGame(
+            board_size=self.board_size,
+            stones_per_player=self.stones_per_player,
+        )
+        cloned_game.board = self.copy_board()
+        cloned_game.current_player = self.current_player
+        cloned_game.move_count = self.move_count
+        cloned_game.stones_placed = dict(self.stones_placed)
+        cloned_game.move_history = list(self.move_history)
+        cloned_game.last_captured_positions = list(self.last_captured_positions)
+        return cloned_game
+
     def get_legal_moves(self) -> List[Position]:
         """Return all currently available empty cells."""
 
@@ -64,6 +84,11 @@ class TerritoryCaptureGame:
                 if self.board[row][col] == EMPTY:
                     legal_moves.append((row, col))
         return legal_moves
+
+    def get_legal_actions(self) -> List[Position]:
+        """Return legal actions using AI-friendly naming."""
+
+        return self.get_legal_moves()
 
     def is_legal_move(self, move: Position) -> bool:
         """Check whether a move can be played."""
@@ -92,6 +117,11 @@ class TerritoryCaptureGame:
         if not self.is_terminal():
             self.current_player = PLAYER_O if player == PLAYER_X else PLAYER_X
 
+    def apply_action(self, action: Position) -> None:
+        """Apply an action using AI-friendly naming."""
+
+        self.apply_move(action)
+
     def _apply_captures(self) -> List[Position]:
         """Remove stones with no empty neighboring cells simultaneously."""
 
@@ -115,6 +145,11 @@ class TerritoryCaptureGame:
         """Delegate territory scoring to the rules module."""
 
         return evaluate_territory(self.board)
+
+    def get_territory_scores(self) -> Dict[str, int]:
+        """Return only the final territory totals for the current board."""
+
+        return dict(self.evaluate_territory().scores)
 
     def get_winner(self) -> Optional[str]:
         """Return the winning player, or None for a draw."""
@@ -143,3 +178,9 @@ class TerritoryCaptureGame:
         """Expose the board state as a sequence for future encoders."""
 
         return self.board
+
+    @property
+    def board_state(self) -> List[List[str]]:
+        """Expose a safe copy of the board for agent-side inspection."""
+
+        return self.copy_board()

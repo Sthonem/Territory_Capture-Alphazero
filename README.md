@@ -42,7 +42,14 @@ territory-capture/
     utils.py
     demo.py
     gui.py
+    agents.py
+    simulate.py
+    encoding.py
+    dataset.py
   tests/
+    test_agents.py
+    test_encoding.py
+    test_dataset.py
     test_game.py
     test_rules.py
 ```
@@ -74,6 +81,58 @@ From the project root:
 ```bash
 python -m unittest discover -s tests -v
 ```
+
+## Running Agent Simulations
+
+From the project root:
+
+```bash
+python -m src.simulate --x-agent random --o-agent random --games 100
+python -m src.simulate --x-agent heuristic --o-agent random --games 100
+python -m src.simulate --x-agent heuristic --o-agent heuristic --games 100
+```
+
+Available baseline agents:
+
+- `random`
+- `heuristic`
+
+Heuristic agent idea:
+
+- prefers central cells
+- prefers cells with more nearby empty space
+- prefers moves near friendly stones
+- prefers moves that contest nearby opponent stones
+
+## Representation Layer
+
+Before AlphaZero training, the project now includes a fixed representation layer:
+
+- state encoding shape: `(2, 5, 5)`
+- channel 1: current player stones
+- channel 2: opponent stones
+- fixed action space: `25` actions, one per board cell
+- legal action mask: length `25`, with `1` for legal moves and `0` for illegal moves
+
+This layer is intended for later use by:
+
+- policy/value neural networks
+- MCTS
+- self-play data generation
+
+## Self-Play Dataset Pipeline
+
+The project also includes a simple self-play dataset layer for future training.
+
+Each training sample currently contains:
+
+- encoded state
+- one-hot policy target for the selected move
+- value target from the final game outcome
+- legal action mask
+
+For now, the policy target is based only on the action chosen by a baseline agent.
+Later, this placeholder can be replaced by an MCTS visit-count distribution.
 
 ## Extension Plan
 
