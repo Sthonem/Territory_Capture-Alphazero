@@ -47,10 +47,21 @@ territory-capture/
     encoding.py
     dataset.py
     generate_dataset.py
+    ai_eval.py
+    self_play.py
+    train.py
+    arena.py
+    alpha_zero_loop.py
   tests/
     test_agents.py
     test_encoding.py
     test_dataset.py
+    test_ai_eval.py
+    test_self_play.py
+    test_mcts.py
+    test_train.py
+    test_arena.py
+    test_alpha_zero_loop.py
     test_game.py
     test_rules.py
 ```
@@ -147,31 +158,49 @@ python -m src.generate_dataset --games 2000 --x-agent heuristic --o-agent random
 Recommended higher-quality examples:
 
 ```bash
-python -m src.generate_dataset --games 2000 --x-agent heuristic --o-agent heuristic --encoding turn-plane --output hh_samples_2000.json
-python -m src.generate_dataset --games 2000 --x-agent minimax --o-agent heuristic --encoding turn-plane --workers 4 --output mh_samples_2000.json
+python -m src.generate_dataset --games 2000 --x-agent heuristic --o-agent heuristic --output hh_samples_2000.json
+python -m src.generate_dataset --games 2000 --x-agent minimax --o-agent heuristic --workers 4 --output mh_samples_2000.json
 ```
 
 Precise dataset split examples:
 
 ```bash
-python -m src.generate_dataset --games 40000 --x-agent minimax --o-agent heuristic --encoding turn-plane --workers 4 --output mh_40k.json
-python -m src.generate_dataset --games 30000 --x-agent heuristic --o-agent heuristic --encoding turn-plane --workers 4 --output hh_30k.json
-python -m src.generate_dataset --games 20000 --x-agent heuristic --o-agent random --encoding turn-plane --workers 4 --output hr_20k.json
-python -m src.generate_dataset --games 10000 --x-agent random --o-agent random --encoding turn-plane --workers 4 --output rr_10k.json
+python -m src.generate_dataset --games 40000 --x-agent minimax --o-agent heuristic --workers 4 --output mh_40k.json
+python -m src.generate_dataset --games 30000 --x-agent heuristic --o-agent heuristic --workers 4 --output hh_30k.json
+python -m src.generate_dataset --games 20000 --x-agent heuristic --o-agent random --workers 4 --output hr_20k.json
+python -m src.generate_dataset --games 10000 --x-agent random --o-agent random --workers 4 --output rr_10k.json
 ```
 
 You can change:
 
 - `--games` to control dataset size
 - `--x-agent` and `--o-agent` to choose `random`, `heuristic`, or `minimax`
-- `--encoding` to choose `relative` `(2, 5, 5)` or `turn-plane` `(3, 5, 5)`
 - `--workers` to enable multiprocessing
 - `--output` to choose the base JSON filename
+
+Dataset generation now always uses the consistent `(2, 5, 5)` encoding.
 
 The script automatically appends a timestamp to the output file, for example:
 
 - `mh_40k_20260324_153000.json`
 - `hh_30k_20260324_153500.json`
+
+## Training Loop
+
+The project now includes a simplified AlphaZero-style loop:
+
+1. generate self-play data
+2. train the policy-value network
+3. evaluate the new checkpoint against the current best model
+4. promote the new model if it wins often enough
+
+Useful commands:
+
+```bash
+python -m src.train --data self_play_data.json --output src/latest_model.pth --epochs 5
+python -m src.arena --candidate src/latest_model.pth --incumbent src/model.pth --games 20 --promote
+python -m src.alpha_zero_loop --self-play-games 20 --arena-games 20 --epochs 5
+```
 
 ## Extension Plan
 

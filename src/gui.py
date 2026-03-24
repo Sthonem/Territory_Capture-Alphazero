@@ -5,6 +5,7 @@ from __future__ import annotations
 import tkinter as tk
 from typing import Dict, Optional, Tuple
 
+from .ai_agent import AIAgent
 from .game import GameResult, TerritoryCaptureGame
 from .rules import EMPTY, PLAYER_O, PLAYER_X
 
@@ -35,6 +36,9 @@ TERRITORY_X_WIN = "#183962"
 TERRITORY_O_WIN = "#4b1b31"
 CAPTURE_FLASH = "#6b4f0b"
 CAPTURE_FLASH_TEXT = "#ffd76a"
+MODE_HUMAN_VS_HUMAN = "Human vs Human"
+MODE_HUMAN_VS_AI = "Human vs AI"
+MODE_AI_VS_AI = "AI vs AI"
 
 
 class TerritoryCaptureGUI:
@@ -52,6 +56,15 @@ class TerritoryCaptureGUI:
         self.current_result: Optional[GameResult] = None
         self.rules_window: Optional[tk.Toplevel] = None
         self.recently_captured_positions: set[Position] = set()
+        self.ai_move_pending = False
+        self.mode_var = tk.StringVar(value=MODE_HUMAN_VS_AI)
+        self.ai_error: Optional[str] = None
+
+        try:
+            self.ai = AIAgent()
+        except Exception as exc:
+            self.ai = None
+            self.ai_error = str(exc)
 
         self.status_var = tk.StringVar()
         self.score_var = tk.StringVar()
@@ -126,6 +139,35 @@ class TerritoryCaptureGUI:
 
         action_row = tk.Frame(self.header_frame, bg=WINDOW_BG, pady=10)
         action_row.pack()
+
+        mode_menu = tk.OptionMenu(
+            action_row,
+            self.mode_var,
+            MODE_HUMAN_VS_HUMAN,
+            MODE_HUMAN_VS_AI,
+            MODE_AI_VS_AI,
+            command=self._handle_mode_change,
+        )
+        mode_menu.configure(
+            font=("Helvetica", 11, "bold"),
+            bg="#102042",
+            fg="#eaf7ff",
+            activebackground="#173262",
+            activeforeground="#eaf7ff",
+            relief=tk.FLAT,
+            highlightthickness=1,
+            highlightbackground="#4cc9ff",
+            padx=10,
+            pady=6,
+            cursor="hand2",
+        )
+        mode_menu["menu"].configure(
+            bg="#102042",
+            fg="#eaf7ff",
+            activebackground="#173262",
+            activeforeground="#eaf7ff",
+        )
+        mode_menu.pack(side="left", padx=6)
 
         how_to_play_button = tk.Button(
             action_row,
@@ -248,10 +290,19 @@ class TerritoryCaptureGUI:
         )
         footer_note.pack()
 
+    def _handle_mode_change(self, _: str) -> None:
+        """Restart the game after the user changes the play mode."""
+
+        self._reset_game()
+
     def _handle_hover(self, position: Position, is_hovered: bool) -> None:
         """Apply a soft glow to hoverable empty cells."""
 
-        if self.game.is_terminal() or not self.game.is_legal_move(position):
+        if (
+            self.game.is_terminal()
+            or not self.game.is_legal_move(position)
+            or not self._is_human_turn()
+        ):
             return
 
         button = self.buttons[position]
@@ -271,25 +322,10 @@ class TerritoryCaptureGUI:
     def _handle_move(self, position: Position) -> None:
         """Apply a human move and update the interface."""
 
-        if not self.game.is_legal_move(position):
+        if not self._is_human_turn() or not self.game.is_legal_move(position):
             return
 
-        self.game.apply_move(position)
-        self.last_move = position
-        self.current_result = None
-        self.recently_captured_positions = set(self.game.last_captured_positions)
-        if self.recently_captured_positions:
-            removed_count = len(self.recently_captured_positions)
-            noun = "stone" if removed_count == 1 else "stones"
-            self.info_var.set(f"Capture resolved: {removed_count} {noun} removed.")
-        else:
-            self.info_var.set(
-                "No capture this turn. Stones with no empty neighbors are removed."
-            )
-        self._refresh_view()
-
-        if self.game.is_terminal():
-            self._show_final_result()
+        self._commit_move(position, actor_name="Human")
 
     def _reset_game(self) -> None:
         """Start a fresh match."""
@@ -298,13 +334,13 @@ class TerritoryCaptureGUI:
         self.last_move = None
         self.current_result = None
         self.recently_captured_positions = set()
+        self.ai_move_pending = False
         self.info_var.set(
             "Place 8 stones each. Stones with no empty neighbors are removed."
         )
-        self.legend_var.set(
-            "Stone colors: blue = X, pink = O. Territory appears after the game."
-        )
+        self.legend_var.set(self._build_legend_text())
         self._refresh_view()
+        self._schedule_ai_move_if_needed()
 
     def _refresh_view(self) -> None:
         """Redraw board cells and status text."""
@@ -324,6 +360,8 @@ class TerritoryCaptureGUI:
             self.status_var.set("Game finished")
         else:
             self.status_var.set(f"Current turn: Player {self.game.current_player}")
+            if self.ai_error is not None:
+                self.status_var.set(f"{self.status_var.get()}  |  AI unavailable")
 
         self.score_var.set(
             f"Moves: {self.game.move_count}/{self.game.max_moves}    "
@@ -421,7 +459,7 @@ class TerritoryCaptureGUI:
                 fg=TEXT_PRIMARY,
                 activebackground=CELL_EMPTY_HOVER,
                 activeforeground=TEXT_PRIMARY,
-                state=tk.NORMAL,
+                state=tk.NORMAL if self._is_human_turn() else tk.DISABLED,
                 highlightbackground=CELL_BORDER,
             )
 
@@ -699,6 +737,95 @@ class TerritoryCaptureGUI:
         """Start the Tkinter event loop."""
 
         self.root.mainloop()
+
+    def _build_legend_text(self) -> str:
+        """Return a legend string that reflects the selected mode."""
+
+        mode = self.mode_var.get()
+        if self.ai_error is not None:
+            return (
+                "Stone colors: blue = X, pink = O. "
+                f"AI disabled: {self.ai_error}"
+            )
+        if mode == MODE_HUMAN_VS_AI:
+            return "Mode: Human controls X, AI controls O."
+        if mode == MODE_AI_VS_AI:
+            return "Mode: AI controls both X and O."
+        return "Mode: Human controls both X and O."
+
+    def _is_ai_player(self, player: str) -> bool:
+        """Return True when the given player should be controlled by AI."""
+
+        if self.ai is None:
+            return False
+
+        mode = self.mode_var.get()
+        if mode == MODE_AI_VS_AI:
+            return True
+        if mode == MODE_HUMAN_VS_AI and player == PLAYER_O:
+            return True
+        return False
+
+    def _is_human_turn(self) -> bool:
+        """Return True when the current turn should accept human input."""
+
+        return (
+            not self.game.is_terminal()
+            and not self.ai_move_pending
+            and not self._is_ai_player(self.game.current_player)
+        )
+
+    def _schedule_ai_move_if_needed(self) -> None:
+        """Schedule an AI turn for smoother UX."""
+
+        if self.game.is_terminal() or self.ai_move_pending:
+            return
+        if not self._is_ai_player(self.game.current_player):
+            return
+
+        self.ai_move_pending = True
+        self._refresh_view()
+        self.root.after(500, self._run_ai_turn)
+
+    def _run_ai_turn(self) -> None:
+        """Ask the AI for a move and apply it."""
+
+        self.ai_move_pending = False
+        if self.game.is_terminal() or self.ai is None:
+            self._refresh_view()
+            return
+        if not self._is_ai_player(self.game.current_player):
+            self._refresh_view()
+            return
+
+        action = self.ai.select_action(self.game)
+        self._commit_move(action, actor_name="AI")
+
+    def _commit_move(self, position: Position, actor_name: str) -> None:
+        """Apply one move and handle follow-up UI updates."""
+
+        self.game.apply_move(position)
+        self.last_move = position
+        self.current_result = None
+        self.recently_captured_positions = set(self.game.last_captured_positions)
+
+        if self.recently_captured_positions:
+            removed_count = len(self.recently_captured_positions)
+            noun = "stone" if removed_count == 1 else "stones"
+            self.info_var.set(
+                f"{actor_name} played {position}. Capture resolved: "
+                f"{removed_count} {noun} removed."
+            )
+        else:
+            self.info_var.set(f"{actor_name} played {position}.")
+
+        self._refresh_view()
+
+        if self.game.is_terminal():
+            self._show_final_result()
+            return
+
+        self._schedule_ai_move_if_needed()
 
 
 def main() -> None:

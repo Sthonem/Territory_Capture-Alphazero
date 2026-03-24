@@ -26,7 +26,6 @@ from .encoding import (
     EncodedState,
     action_to_index,
     encode_state,
-    encode_state_with_turn_plane,
     get_legal_action_mask,
 )
 from .game import TerritoryCaptureGame
@@ -141,9 +140,23 @@ def get_encoder_by_name(encoding_name: str) -> EncoderFn:
     normalized_name = encoding_name.strip().lower()
     if normalized_name in {"relative", "current-player", "2ch"}:
         return encode_state
-    if normalized_name in {"turn-plane", "absolute", "3ch"}:
-        return encode_state_with_turn_plane
     raise ValueError(f"Unknown encoding mode: {encoding_name}")
+
+
+def has_expected_state_shape(
+    encoded_state: EncodedState,
+    channels: int = 2,
+    board_size: int = 5,
+) -> bool:
+    """Return True when an encoded state matches the expected shape."""
+
+    if len(encoded_state) != channels:
+        return False
+    return all(
+        len(channel) == board_size
+        and all(len(row) == board_size for row in channel)
+        for channel in encoded_state
+    )
 
 
 def build_training_samples(

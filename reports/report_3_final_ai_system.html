@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Territory Capture - Final AI System</title>
+  <style>
+    body {
+      font-family: "Times New Roman", serif;
+      font-size: 12pt;
+      line-height: 1.5;
+      margin: 1in;
+      color: #111111;
+    }
+    h1 {
+      font-size: 18pt;
+      text-align: center;
+      margin-bottom: 24pt;
+    }
+    p {
+      text-align: justify;
+      margin-bottom: 12pt;
+    }
+  </style>
+</head>
+<body>
+  <h1>Final AI-Enabled Version of Territory Capture</h1>
+
+  <p>
+    In the final stage of the project, Territory Capture was extended from a custom board game into an AI-enabled learning
+    system. The final version includes a policy-value neural network, Monte Carlo Tree Search (MCTS), self-play data generation,
+    replay-buffer-based training, model evaluation, and iterative improvement. Although the system is a simplified implementation
+    rather than a perfect reproduction of the original AlphaZero paper, it successfully captures the main ideas of an
+    AlphaZero-style algorithm for a custom strategy game.
+  </p>
+
+  <p>
+    At the center of the system is a deep learning model implemented in PyTorch. The network receives a game-state tensor of
+    shape (2, 5, 5) and produces two outputs. The first output is a policy prediction over the 25 possible board actions. The
+    second output is a scalar value estimate between -1 and 1 that represents the expected outcome of the position. Residual
+    blocks were used in the architecture so that the model follows the same general design philosophy as AlphaZero-style
+    policy-value networks. This makes the model suitable for both action selection and state evaluation.
+  </p>
+
+  <p>
+    The neural network does not act alone. Instead, it is combined with Monte Carlo Tree Search. Before making a move, MCTS
+    explores possible continuations of the current position and uses the network outputs to guide the search. The policy head
+    provides prior probabilities for expansion, while the value head estimates the quality of leaf states. The implementation
+    also includes useful AlphaZero-inspired improvements such as root reuse, visit-count policy extraction, Dirichlet noise at
+    the root for exploration during self-play, and temperature-based action selection in the opening moves. Together, these
+    features allow the system to balance exploitation of strong moves with exploration of alternative positions.
+  </p>
+
+  <p>
+    Self-play is a crucial part of the final system. The AI plays games against itself and records training examples for every
+    move. Each sample contains the encoded state, the MCTS policy distribution derived from visit counts, and the final game
+    result from the perspective of the player to move. These records are accumulated in a replay buffer, which stores a rolling
+    window of recent samples. The replay buffer makes training more stable because the model learns from a broader set of recent
+    experiences instead of relying only on the most recently generated games.
+  </p>
+
+  <p>
+    A training pipeline was then built on top of this data. The replay-buffer samples are used to train the policy-value network,
+    and the resulting candidate model is evaluated against the current best model in an arena setting. If the candidate model
+    performs well enough, it is promoted to become the new best model. This creates an iterative improvement loop consisting of
+    self-play, training, evaluation, and model replacement. That loop is the core idea behind AlphaZero-style learning.
+  </p>
+
+  <p>
+    The project also includes practical evaluation tools. AI vs AI match systems, AI vs Minimax comparisons, result statistics,
+    and win-rate plots were added to measure progress experimentally. In addition, the trained AI was integrated into the existing
+    graphical interface so that the game can be played in Human vs Human, Human vs AI, and AI vs AI modes. This makes the final
+    system not only technically complete, but also easy to demonstrate in a presentation or live project defense.
+  </p>
+
+  <p>
+    In conclusion, the final version of Territory Capture includes the essential components of a simplified AlphaZero-style
+    algorithm for a custom strategy game: game-state encoding, a policy-value network, MCTS, self-play, replay-based training,
+    and iterative evaluation. Therefore, the project successfully fulfills the goal of applying an AlphaZero-inspired approach
+    to an original simple strategy game in a way that is both academically defensible and practically demonstrable.
+  </p>
+</body>
+</html>

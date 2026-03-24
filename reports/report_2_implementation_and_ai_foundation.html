@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Territory Capture - Implementation and AI Foundation</title>
+  <style>
+    body {
+      font-family: "Times New Roman", serif;
+      font-size: 12pt;
+      line-height: 1.5;
+      margin: 1in;
+      color: #111111;
+    }
+    h1 {
+      font-size: 18pt;
+      text-align: center;
+      margin-bottom: 24pt;
+    }
+    p {
+      text-align: justify;
+      margin-bottom: 12pt;
+    }
+  </style>
+</head>
+<body>
+  <h1>Implementation of the Game and AI Foundation</h1>
+
+  <p>
+    The Territory Capture project was implemented in Python with a modular and extendable software structure.
+    The first objective of the project was to create a reliable game environment that correctly represents the rules
+    of the custom board game. The second objective was to prepare this environment for future artificial intelligence
+    methods, especially AlphaZero-style learning. For this reason, the software architecture was designed not only to
+    support gameplay, but also to support search algorithms, data generation, and machine learning components.
+  </p>
+
+  <p>
+    The game logic and the user interface were intentionally separated. The core engine handles board representation,
+    turn management, legal move generation, move application, terminal-state detection, capture processing, and winner
+    determination. The territory scoring logic was also kept in a dedicated rules module rather than being mixed into the
+    main game loop. This separation improved readability and made the code easier to test, maintain, and reuse for AI
+    development. As a result, the game engine can be used independently of the graphical interface, which is essential
+    for automated simulations and self-play.
+  </p>
+
+  <p>
+    The board is internally represented as a 5x5 structure, and the players are represented by the symbols X and O. On
+    each turn, the current player selects a legal empty cell and places a stone there. The game state is then updated,
+    the optional capture rule is applied, and the turn passes to the other player. When the maximum number of moves is
+    reached, the engine evaluates the final territory scores and determines the winner. Since the environment is deterministic
+    and clearly defined, it is suitable for both classical AI agents and learning-based methods.
+  </p>
+
+  <p>
+    To provide baseline performance comparisons, several non-learning agents were added. A RandomAgent selects any legal
+    move uniformly at random. A HeuristicAgent uses a small set of understandable positional rules, such as preferring the
+    center, valuing empty neighboring cells, and improving local influence. A MinimaxAgent performs shallow lookahead with
+    a simple evaluation function. These agents serve two purposes. First, they verify that the game engine behaves correctly
+    under repeated automated play. Second, they provide useful benchmark opponents for later evaluation of the neural network
+    based system.
+  </p>
+
+  <p>
+    An important step toward AI training was the addition of a representation layer. Each game state is encoded into a fixed
+    tensor of shape (2, 5, 5). The first channel stores the stones of the current player, and the second channel stores the
+    stones of the opponent. This perspective-based representation means that the model always sees the board from the point of
+    view of the player whose turn it is. In addition, each board position is mapped to a fixed action index from 0 to 24, and
+    a legal action mask indicates which actions are valid in the current position. These design choices make the environment
+    directly compatible with policy-based neural networks and Monte Carlo Tree Search.
+  </p>
+
+  <p>
+    The project also includes a self-play dataset pipeline. For each recorded move, the system stores the encoded state, a
+    policy target, and a value target. In the earlier stages, policy targets were stored as simple one-hot vectors. Later,
+    stronger policy targets based on search visit counts were added. The dataset tools allow games to be simulated in large
+    numbers and exported to JSON. A replay buffer was also introduced so that training can use a rolling collection of recent
+    self-play samples rather than depending only on the newest games. This makes the learning setup closer to modern game-AI
+    pipelines.
+  </p>
+
+  <p>
+    In summary, the software implementation does more than simply run the game. It provides a complete foundation for artificial
+    intelligence experiments. The project now includes a stable game environment, baseline agents, state encoding, action mapping,
+    legal move masking, and data generation utilities. These components make the system suitable for building search-based and
+    learning-based AI methods in a clean and academically explainable way.
+  </p>
+</body>
+</html>

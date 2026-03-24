@@ -34,7 +34,6 @@ class TestGenerateDataset(unittest.TestCase):
             x_agent_name="heuristic",
             o_agent_name="heuristic",
             seed=10,
-            encoding_name="turn-plane",
         )
 
         self.assertEqual(sum(task[0] for task in tasks), 250)
@@ -52,6 +51,7 @@ class TestGenerateDataset(unittest.TestCase):
         self.assertEqual(summary.total_games, 2)
         self.assertEqual(summary.matchup_code, "hr")
         self.assertTrue(Path(summary.output_path).name.startswith("tiny_dataset_"))
+        self.assertEqual(summary.skipped_samples, 0)
 
 
 if __name__ == "__main__":

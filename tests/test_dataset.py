@@ -11,6 +11,7 @@ from src.dataset import (
     TrainingSample,
     create_one_hot_policy_target,
     get_encoder_by_name,
+    has_expected_state_shape,
     load_samples_from_json,
     outcome_value_for_player,
     play_self_play_episode,
@@ -73,16 +74,15 @@ class TestDatasetPipeline(unittest.TestCase):
 
         self.assertEqual(loaded_samples, episode.samples)
 
-    def test_self_play_can_use_turn_plane_encoding(self) -> None:
+    def test_dataset_encoder_lookup_returns_relative_encoder(self) -> None:
         episode = play_self_play_episode(
             x_agent=HeuristicAgent(),
             o_agent=RandomAgent(seed=9),
-            encoder=get_encoder_by_name("turn-plane"),
+            encoder=get_encoder_by_name("relative"),
         )
 
         first_sample = episode.samples[0]
-        self.assertEqual(len(first_sample.encoded_state), 3)
-        self.assertEqual(len(first_sample.encoded_state[2]), 5)
+        self.assertTrue(has_expected_state_shape(first_sample.encoded_state))
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Iterable, List, Optional, Sequence
 
 from .agents import create_agent
-from .dataset import get_encoder_by_name, play_self_play_episode
+from .dataset import get_encoder_by_name, has_expected_state_shape, play_self_play_episode
 
 DEFAULT_PROGRESS_EVERY = 100
 DEFAULT_GAMES_PER_TASK = 100
@@ -24,6 +24,7 @@ class DatasetGenerationSummary:
     matchup_code: str
     total_games: int
     total_samples: int
+    skipped_samples: int
     output_path: Path
 
     @property
@@ -64,12 +65,6 @@ def parse_args() -> argparse.Namespace:
         help="Optional base seed for stochastic agents.",
     )
     parser.add_argument(
-        "--encoding",
-        default="turn-plane",
-        choices=["relative", "turn-plane"],
-        help="State encoding mode to store in the dataset.",
-    )
-    parser.add_argument(
         "--workers",
         type=int,
         default=1,
@@ -90,7 +85,6 @@ def generate_dataset(
     o_agent_name: str,
     output_path: str | Path,
     seed: Optional[int] = None,
-    encoding_name: str = "turn-plane",
     workers: int = 1,
     progress_every: int = DEFAULT_PROGRESS_EVERY,
 ) -> DatasetGenerationSummary:
@@ -115,10 +109,9 @@ def generate_dataset(
         x_agent_name=x_agent_name,
         o_agent_name=o_agent_name,
         seed=seed,
-        encoding_name=encoding_name,
     )
 
-    total_samples = stream_tasks_to_json(
+    total_samples, skipped_samples = stream_tasks_to_json(
         tasks=tasks,
         output_path=resolved_output_path,
         workers=workers,
@@ -129,6 +122,7 @@ def generate_dataset(
         matchup_code=matchup,
         total_games=num_games,
         total_samples=total_samples,
+        skipped_samples=skipped_samples,
         output_path=resolved_output_path,
     )
 
@@ -160,19 +154,18 @@ def build_generation_tasks(
     x_agent_name: str,
     o_agent_name: str,
     seed: Optional[int],
-    encoding_name: str,
     games_per_task: int = DEFAULT_GAMES_PER_TASK,
-) -> List[tuple[int, str, str, Optional[int], str]]:
+) -> List[tuple[int, str, str, Optional[int]]]:
     """Split a dataset run into small stable tasks."""
 
-    tasks: List[tuple[int, str, str, Optional[int], str]] = []
+    tasks: List[tuple[int, str, str, Optional[int]]] = []
     remaining_games = num_games
     task_index = 0
 
     while remaining_games > 0:
         task_games = min(games_per_task, remaining_games)
         task_seed = None if seed is None else seed + task_index * 1000
-        tasks.append((task_games, x_agent_name, o_agent_name, task_seed, encoding_name))
+        tasks.append((task_games, x_agent_name, o_agent_name, task_seed))
         remaining_games -= task_games
         task_index += 1
 
@@ -180,15 +173,16 @@ def build_generation_tasks(
 
 
 def stream_tasks_to_json(
-    tasks: Sequence[tuple[int, str, str, Optional[int], str]],
+    tasks: Sequence[tuple[int, str, str, Optional[int]]],
     output_path: Path,
     workers: int,
     progress_every: int,
-) -> int:
+) -> tuple[int, int]:
     """Write task results incrementally to JSON to avoid large memory spikes."""
 
     completed_games = 0
     total_samples = 0
+    skipped_samples = 0
     first_item = True
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -196,83 +190,95 @@ def stream_tasks_to_json(
         output_file.write("[\n")
 
         if workers == 1:
-            task_results: Iterable[tuple[int, list[dict]]] = map(
+            task_results: Iterable[tuple[int, int, list[dict]]] = map(
                 _generate_task_samples,
                 tasks,
             )
         else:
             with mp.Pool(processes=workers) as pool:
                 task_results = pool.imap_unordered(_generate_task_samples, tasks)
-                completed_games, total_samples, first_item = _consume_task_results(
+                completed_games, total_samples, skipped_samples, first_item = _consume_task_results(
                     task_results=task_results,
                     output_file=output_file,
                     completed_games=completed_games,
                     total_samples=total_samples,
+                    skipped_samples=skipped_samples,
                     progress_every=progress_every,
                     first_item=first_item,
                 )
                 output_file.write("\n]\n")
-                return total_samples
+                return total_samples, skipped_samples
 
-        completed_games, total_samples, first_item = _consume_task_results(
+        completed_games, total_samples, skipped_samples, first_item = _consume_task_results(
             task_results=task_results,
             output_file=output_file,
             completed_games=completed_games,
             total_samples=total_samples,
+            skipped_samples=skipped_samples,
             progress_every=progress_every,
             first_item=first_item,
         )
         output_file.write("\n]\n")
 
-    return total_samples
+    return total_samples, skipped_samples
 
 
 def _consume_task_results(
-    task_results: Iterable[tuple[int, list[dict]]],
+    task_results: Iterable[tuple[int, int, list[dict]]],
     output_file,
     completed_games: int,
     total_samples: int,
+    skipped_samples: int,
     progress_every: int,
     first_item: bool,
-) -> tuple[int, int, bool]:
+) -> tuple[int, int, int, bool]:
     """Consume finished task chunks and stream them into one JSON array."""
 
-    for task_games, chunk_payload in task_results:
+    for task_games, chunk_skipped, chunk_payload in task_results:
         for sample in chunk_payload:
             if not first_item:
                 output_file.write(",\n")
             json.dump(sample, output_file)
             first_item = False
         completed_games += task_games
+        skipped_samples += chunk_skipped
         total_samples += len(chunk_payload)
 
         if progress_every and (completed_games % progress_every == 0):
             print(f"Completed {completed_games} games...")
 
-    return completed_games, total_samples, first_item
+    return completed_games, total_samples, skipped_samples, first_item
 
 
 def _generate_task_samples(
-    task: tuple[int, str, str, Optional[int], str],
-) -> tuple[int, list[dict]]:
+    task: tuple[int, str, str, Optional[int]],
+) -> tuple[int, int, list[dict]]:
     """Generate one task worth of samples and return JSON-ready dictionaries."""
 
-    num_games, x_agent_name, o_agent_name, seed, encoding_name = task
+    num_games, x_agent_name, o_agent_name, seed = task
     x_agent = create_agent(x_agent_name, seed=seed)
     o_seed: Optional[int] = None if seed is None else seed + 1
     o_agent = create_agent(o_agent_name, seed=o_seed)
-    encoder = get_encoder_by_name(encoding_name)
+    encoder = get_encoder_by_name("relative")
 
     payload: list[dict] = []
+    skipped_samples = 0
     for _ in range(num_games):
         episode = play_self_play_episode(
             x_agent=x_agent,
             o_agent=o_agent,
             encoder=encoder,
         )
-        payload.extend(asdict(sample) for sample in episode.samples)
+        for sample in episode.samples:
+            try:
+                assert has_expected_state_shape(sample.encoded_state, channels=2, board_size=5)
+            except AssertionError:
+                skipped_samples += 1
+                print("Warning: skipped invalid sample with unexpected encoded_state shape.")
+                continue
+            payload.append(asdict(sample))
 
-    return num_games, payload
+    return num_games, skipped_samples, payload
 
 
 def main() -> None:
@@ -285,7 +291,6 @@ def main() -> None:
         o_agent_name=args.o_agent,
         output_path=args.output,
         seed=args.seed,
-        encoding_name=args.encoding,
         workers=args.workers,
         progress_every=args.progress_every,
     )
@@ -294,6 +299,7 @@ def main() -> None:
     print(f"Matchup type: {summary.matchup_code}")
     print(f"Total games played: {summary.total_games}")
     print(f"Total samples collected: {summary.total_samples}")
+    print(f"Skipped samples: {summary.skipped_samples}")
     print(f"Output file: {summary.output_path}")
     print(f"Average samples per game: {summary.average_samples_per_game:.2f}")
 
