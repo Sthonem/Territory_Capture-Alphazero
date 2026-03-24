@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Sequence
+from typing import Any, Callable, Dict, List, Sequence
 
 from .agents import Agent
 from .encoding import (
@@ -26,6 +26,7 @@ from .encoding import (
     EncodedState,
     action_to_index,
     encode_state,
+    encode_state_with_turn_plane,
     get_legal_action_mask,
 )
 from .game import TerritoryCaptureGame
@@ -63,6 +64,9 @@ class SelfPlayEpisode:
     move_count: int
 
 
+EncoderFn = Callable[[TerritoryCaptureGame], EncodedState]
+
+
 def create_one_hot_policy_target(action_index: int) -> List[int]:
     """Convert one selected action into a length-25 policy target."""
 
@@ -79,6 +83,7 @@ def play_self_play_episode(
     o_agent: Agent,
     board_size: int = 5,
     stones_per_player: int = 8,
+    encoder: EncoderFn = encode_state,
 ) -> SelfPlayEpisode:
     """Play one game and return the resulting training samples."""
 
@@ -89,7 +94,7 @@ def play_self_play_episode(
     recorded_positions: List[RecordedPosition] = []
 
     while not game.is_terminal():
-        recorded_positions.append(record_position(game))
+        recorded_positions.append(record_position(game, encoder=encoder))
         agent = x_agent if game.current_player == "X" else o_agent
         action = agent.select_action(game.clone())
         game.apply_action(action)
@@ -115,16 +120,30 @@ def play_self_play_episode(
     )
 
 
-def record_position(game: TerritoryCaptureGame) -> RecordedPosition:
+def record_position(
+    game: TerritoryCaptureGame,
+    encoder: EncoderFn = encode_state,
+) -> RecordedPosition:
     """Record the representation of the current state before a move."""
 
     legal_action_mask = get_legal_action_mask(game)
     return RecordedPosition(
-        encoded_state=encode_state(game),
+        encoded_state=encoder(game),
         selected_action_index=-1,
         legal_action_mask=legal_action_mask,
         player_to_move=game.current_player,
     )
+
+
+def get_encoder_by_name(encoding_name: str) -> EncoderFn:
+    """Return a named encoder used by dataset generation scripts."""
+
+    normalized_name = encoding_name.strip().lower()
+    if normalized_name in {"relative", "current-player", "2ch"}:
+        return encode_state
+    if normalized_name in {"turn-plane", "absolute", "3ch"}:
+        return encode_state_with_turn_plane
+    raise ValueError(f"Unknown encoding mode: {encoding_name}")
 
 
 def build_training_samples(

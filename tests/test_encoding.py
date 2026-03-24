@@ -8,6 +8,7 @@ from src.encoding import (
     ACTION_SPACE_SIZE,
     action_to_index,
     encode_state,
+    encode_state_with_turn_plane,
     get_legal_action_mask,
     index_to_action,
 )
@@ -68,6 +69,24 @@ class TestEncoding(unittest.TestCase):
         for index in range(ACTION_SPACE_SIZE):
             action = index_to_action(index)
             self.assertEqual(action_to_index(action), index)
+
+    def test_turn_plane_encoding_has_expected_shape_and_turn_channel(self) -> None:
+        game = TerritoryCaptureGame()
+        game.board = [
+            ["X", ".", ".", ".", "."],
+            [".", "O", ".", ".", "."],
+            [".", ".", ".", ".", "."],
+            [".", ".", ".", ".", "."],
+            [".", ".", ".", ".", "."],
+        ]
+        game.current_player = "X"
+
+        encoded = encode_state_with_turn_plane(game)
+
+        self.assertEqual(len(encoded), 3)
+        self.assertEqual(encoded[0][0][0], 1)
+        self.assertEqual(encoded[1][1][1], 1)
+        self.assertTrue(all(value == 1 for row in encoded[2] for value in row))
 
     def test_legal_action_mask_marks_legal_moves(self) -> None:
         game = TerritoryCaptureGame()

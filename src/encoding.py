@@ -41,6 +41,27 @@ def encode_state(game: TerritoryCaptureGame) -> EncodedState:
     return [current_player_channel, opponent_channel]
 
 
+def encode_state_with_turn_plane(game: TerritoryCaptureGame) -> EncodedState:
+    """Encode the board using fixed player channels plus a turn plane.
+
+    The output shape is always (3, 5, 5):
+    - channel 0: X stones
+    - channel 1: O stones
+    - channel 2: all ones if it is X's turn, else all zeros
+
+    This format is convenient for deep learning pipelines that want a stable,
+    absolute player representation rather than a current-player-relative view.
+    """
+
+    _validate_board_size(game)
+
+    x_channel = _encode_player_channel(game, PLAYER_X)
+    o_channel = _encode_player_channel(game, PLAYER_O)
+    turn_value = 1 if game.current_player == PLAYER_X else 0
+    turn_channel = [[turn_value for _ in range(BOARD_SIZE)] for _ in range(BOARD_SIZE)]
+    return [x_channel, o_channel, turn_channel]
+
+
 def action_to_index(action: Position) -> int:
     """Convert a board coordinate into a fixed action index."""
 

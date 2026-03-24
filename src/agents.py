@@ -7,6 +7,7 @@ replace later when AlphaZero components are added.
 
 from __future__ import annotations
 
+import math
 import random
 from dataclasses import dataclass
 from typing import Optional, Protocol, Tuple
@@ -69,6 +70,12 @@ def pressure_weight(value: int) -> float:
     """Reward moves that challenge nearby opponent influence."""
 
     return float(value)
+
+
+def opponent_of(player: str) -> str:
+    """Return the opponent symbol for a given player."""
+
+    return PLAYER_O if player == PLAYER_X else PLAYER_X
 
 
 @dataclass
@@ -195,6 +202,105 @@ class HeuristicAgent:
         return pressure
 
 
+@dataclass
+class MinimaxAgent:
+    """A shallow deterministic minimax agent for stronger self-play targets.
+
+    This agent searches a few plies ahead and evaluates states using a simple
+    hand-crafted score. It is intentionally shallow so it stays easy to explain
+    in a course presentation and remains affordable for large dataset runs.
+    """
+
+    depth: int = 2
+    name: str = "minimax"
+
+    def __post_init__(self) -> None:
+        if self.depth <= 0:
+            raise ValueError("MinimaxAgent depth must be greater than 0.")
+        self._heuristic = HeuristicAgent()
+
+    def select_action(self, game: TerritoryCaptureGame) -> Position:
+        """Return the best legal move using shallow minimax search."""
+
+        legal_actions = sorted(game.get_legal_actions())
+        if not legal_actions:
+            raise ValueError("MinimaxAgent cannot act in a terminal state.")
+
+        root_player = game.current_player
+        best_score = -math.inf
+        best_action = legal_actions[0]
+
+        for action in legal_actions:
+            next_state = game.clone()
+            next_state.apply_action(action)
+            score = self._minimax(
+                game=next_state,
+                depth=self.depth - 1,
+                root_player=root_player,
+                maximizing=False,
+            )
+            if score > best_score:
+                best_score = score
+                best_action = action
+
+        return best_action
+
+    def _minimax(
+        self,
+        game: TerritoryCaptureGame,
+        depth: int,
+        root_player: str,
+        maximizing: bool,
+    ) -> float:
+        """Search future moves and score positions from the root player's view."""
+
+        if depth == 0 or game.is_terminal():
+            return self._evaluate_position(game, root_player)
+
+        legal_actions = sorted(game.get_legal_actions())
+        if maximizing:
+            best_score = -math.inf
+            for action in legal_actions:
+                next_state = game.clone()
+                next_state.apply_action(action)
+                best_score = max(
+                    best_score,
+                    self._minimax(next_state, depth - 1, root_player, False),
+                )
+            return best_score
+
+        best_score = math.inf
+        for action in legal_actions:
+            next_state = game.clone()
+            next_state.apply_action(action)
+            best_score = min(
+                best_score,
+                self._minimax(next_state, depth - 1, root_player, True),
+            )
+        return best_score
+
+    def _evaluate_position(self, game: TerritoryCaptureGame, root_player: str) -> float:
+        """Score a board using simple territory and local-control features."""
+
+        opponent = opponent_of(root_player)
+        territory_scores = game.get_territory_scores()
+        territory_diff = territory_scores[root_player] - territory_scores[opponent]
+
+        root_stones = sum(cell == root_player for row in game.board for cell in row)
+        opponent_stones = sum(cell == opponent for row in game.board for cell in row)
+        stone_diff = root_stones - opponent_stones
+
+        current_turn_bonus = 0.5 if game.current_player == root_player else -0.5
+        mobility_bonus = len(game.get_legal_actions()) / 25.0
+
+        return (
+            territory_diff * 4.0
+            + stone_diff * 0.5
+            + current_turn_bonus
+            + mobility_bonus
+        )
+
+
 def create_agent(agent_name: str, seed: Optional[int] = None) -> Agent:
     """Create a baseline agent by name."""
 
@@ -203,4 +309,6 @@ def create_agent(agent_name: str, seed: Optional[int] = None) -> Agent:
         return RandomAgent(seed=seed)
     if normalized_name == "heuristic":
         return HeuristicAgent()
+    if normalized_name == "minimax":
+        return MinimaxAgent()
     raise ValueError(f"Unknown agent type: {agent_name}")

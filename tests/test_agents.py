@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from src.agents import HeuristicAgent, RandomAgent
+from src.agents import HeuristicAgent, MinimaxAgent, RandomAgent
 from src.game import TerritoryCaptureGame
 from src.simulate import format_summary, run_simulation
 
@@ -23,6 +23,14 @@ class TestAgentsAndSimulation(unittest.TestCase):
     def test_heuristic_agent_returns_legal_move(self) -> None:
         game = TerritoryCaptureGame()
         agent = HeuristicAgent()
+
+        action = agent.select_action(game)
+
+        self.assertIn(action, game.get_legal_actions())
+
+    def test_minimax_agent_returns_legal_move(self) -> None:
+        game = TerritoryCaptureGame()
+        agent = MinimaxAgent(depth=2)
 
         action = agent.select_action(game)
 

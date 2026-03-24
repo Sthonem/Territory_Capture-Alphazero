@@ -46,6 +46,7 @@ territory-capture/
     simulate.py
     encoding.py
     dataset.py
+    generate_dataset.py
   tests/
     test_agents.py
     test_encoding.py
@@ -96,6 +97,7 @@ Available baseline agents:
 
 - `random`
 - `heuristic`
+- `minimax`
 
 Heuristic agent idea:
 
@@ -133,6 +135,43 @@ Each training sample currently contains:
 
 For now, the policy target is based only on the action chosen by a baseline agent.
 Later, this placeholder can be replaced by an MCTS visit-count distribution.
+
+## Generating Dataset Files
+
+To generate a larger dataset for later Colab training:
+
+```bash
+python -m src.generate_dataset --games 2000 --x-agent heuristic --o-agent random --output samples_2000.json
+```
+
+Recommended higher-quality examples:
+
+```bash
+python -m src.generate_dataset --games 2000 --x-agent heuristic --o-agent heuristic --encoding turn-plane --output hh_samples_2000.json
+python -m src.generate_dataset --games 2000 --x-agent minimax --o-agent heuristic --encoding turn-plane --workers 4 --output mh_samples_2000.json
+```
+
+Precise dataset split examples:
+
+```bash
+python -m src.generate_dataset --games 40000 --x-agent minimax --o-agent heuristic --encoding turn-plane --workers 4 --output mh_40k.json
+python -m src.generate_dataset --games 30000 --x-agent heuristic --o-agent heuristic --encoding turn-plane --workers 4 --output hh_30k.json
+python -m src.generate_dataset --games 20000 --x-agent heuristic --o-agent random --encoding turn-plane --workers 4 --output hr_20k.json
+python -m src.generate_dataset --games 10000 --x-agent random --o-agent random --encoding turn-plane --workers 4 --output rr_10k.json
+```
+
+You can change:
+
+- `--games` to control dataset size
+- `--x-agent` and `--o-agent` to choose `random`, `heuristic`, or `minimax`
+- `--encoding` to choose `relative` `(2, 5, 5)` or `turn-plane` `(3, 5, 5)`
+- `--workers` to enable multiprocessing
+- `--output` to choose the base JSON filename
+
+The script automatically appends a timestamp to the output file, for example:
+
+- `mh_40k_20260324_153000.json`
+- `hh_30k_20260324_153500.json`
 
 ## Extension Plan
 
