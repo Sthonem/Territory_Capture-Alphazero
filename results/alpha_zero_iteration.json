@@ -1,0 +1,12 @@
+{
+  "created_at_utc": "2026-03-25T09:01:44.479748+00:00",
+  "self_play_games": 1,
+  "self_play_samples": 16,
+  "self_play_output": "/private/var/folders/jh/jh14dv5x6h51f6g9m80c4slm0000gn/T/tmpyh3ts2zq/self_play.json",
+  "replay_buffer_size": 16,
+  "replay_buffer_path": "/private/var/folders/jh/jh14dv5x6h51f6g9m80c4slm0000gn/T/tmpyh3ts2zq/replay_buffer.json",
+  "training_checkpoint": "/private/var/folders/jh/jh14dv5x6h51f6g9m80c4slm0000gn/T/tmpyh3ts2zq/latest_model.pth",
+  "training_metadata": "/private/var/folders/jh/jh14dv5x6h51f6g9m80c4slm0000gn/T/tmpyh3ts2zq/latest_model.metadata.json",
+  "arena_metadata": "/private/var/folders/jh/jh14dv5x6h51f6g9m80c4slm0000gn/T/tmpyh3ts2zq/latest_model.arena.json",
+  "candidate_accepted": true
+}

@@ -15,6 +15,12 @@ class ReplayBuffer:
     max_samples: int = 10_000
     records: List[dict] = field(default_factory=list)
 
+    @property
+    def size(self) -> int:
+        """Return the current number of stored samples."""
+
+        return len(self.records)
+
     def extend(self, new_records: Iterable[dict]) -> None:
         """Append new samples and trim older entries when over capacity."""
 

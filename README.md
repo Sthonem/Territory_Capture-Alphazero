@@ -202,6 +202,22 @@ python -m src.arena --candidate src/latest_model.pth --incumbent src/model.pth -
 python -m src.alpha_zero_loop --self-play-games 20 --arena-games 20 --epochs 5
 ```
 
+The training pipeline now also includes:
+
+- per-epoch loss history
+- a learning-rate scheduler
+- JSON metadata next to checkpoints and arena runs
+- replay-buffer-backed iterative training
+- configurable self-play temperature and root-noise settings
+
+Examples:
+
+```bash
+python -m src.train --data self_play_data.json --output src/latest_model.pth --epochs 5 --scheduler-step 3 --scheduler-gamma 0.5
+python -m src.arena --candidate src/latest_model.pth --incumbent src/model.pth --games 20 --promote --metadata results/arena_run.json
+python -m src.alpha_zero_loop --self-play-games 20 --arena-games 20 --epochs 5 --buffer-size 10000 --temperature-moves 6 --opening-temperature 1.0 --late-temperature 0.0
+```
+
 ## Extension Plan
 
 This version includes only the game environment and tests. A later phase can build AlphaZero components on top of this codebase, such as:

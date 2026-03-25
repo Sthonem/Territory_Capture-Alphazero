@@ -22,6 +22,18 @@ class SelfPlaySummary:
     output_path: Path
 
 
+@dataclass(frozen=True)
+class SelfPlayConfig:
+    """Keeps self-play generation settings together for cleaner experiments."""
+
+    num_games: int = 20
+    output_path: str | Path = "self_play_data.json"
+    temperature_moves: int = 6
+    opening_temperature: float = 1.0
+    late_temperature: float = 0.0
+    add_root_noise: bool = True
+
+
 def generate_self_play_games(
     num_games: int = 20,
     output_path: str | Path = "self_play_data.json",
@@ -66,6 +78,23 @@ def generate_self_play_games(
         total_games=num_games,
         total_samples=total_samples,
         output_path=destination,
+    )
+
+
+def generate_self_play_games_with_config(
+    config: SelfPlayConfig,
+    agent: Optional[AIAgent] = None,
+) -> SelfPlaySummary:
+    """Run self-play using a configuration object."""
+
+    return generate_self_play_games(
+        num_games=config.num_games,
+        output_path=config.output_path,
+        agent=agent,
+        temperature_moves=config.temperature_moves,
+        opening_temperature=config.opening_temperature,
+        late_temperature=config.late_temperature,
+        add_root_noise=config.add_root_noise,
     )
 
 

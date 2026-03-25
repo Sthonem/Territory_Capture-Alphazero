@@ -1,0 +1,22 @@
+{
+  "created_at_utc": "2026-03-25T09:01:42.756028+00:00",
+  "checkpoint_path": "/private/var/folders/jh/jh14dv5x6h51f6g9m80c4slm0000gn/T/tmpyh3ts2zq/latest_model.pth",
+  "records_used": 16,
+  "epochs": 1,
+  "batch_size": 64,
+  "initial_learning_rate": 0.001,
+  "validation_split": 0.1,
+  "scheduler": {
+    "name": "StepLR",
+    "step_size": 3,
+    "gamma": 0.5
+  },
+  "history": [
+    {
+      "epoch": 1,
+      "train_loss": 4.097248554229736,
+      "validation_loss": 3.9856481552124023,
+      "learning_rate": 0.001
+    }
+  ]
+}

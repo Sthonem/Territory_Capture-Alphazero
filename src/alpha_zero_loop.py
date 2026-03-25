@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import argparse
+import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .arena import ArenaResult, evaluate_model_against_best
 from .replay_buffer import ReplayBuffer
-from .self_play import SelfPlaySummary, generate_self_play_games
+from .self_play import (
+    SelfPlayConfig,
+    SelfPlaySummary,
+    generate_self_play_games_with_config,
+)
 from .train import TrainingSummary, load_self_play_records, train_policy_value_model
 
 
@@ -19,6 +25,8 @@ class AlphaZeroLoopSummary:
     self_play: SelfPlaySummary
     training: TrainingSummary
     arena: ArenaResult
+    replay_buffer_size: int
+    metadata_path: Path
 
 
 def run_alpha_zero_iteration(
@@ -31,12 +39,23 @@ def run_alpha_zero_iteration(
     incumbent_model_path: str | Path = "src/model.pth",
     acceptance_threshold: float = 0.55,
     replay_buffer_size: int = 10_000,
+    temperature_moves: int = 6,
+    opening_temperature: float = 1.0,
+    late_temperature: float = 0.0,
+    add_root_noise: bool = True,
+    iteration_metadata_path: str | Path = "results/alpha_zero_iteration.json",
 ) -> AlphaZeroLoopSummary:
     """Run one full self-play, training, and arena evaluation cycle."""
 
-    self_play_summary = generate_self_play_games(
-        num_games=self_play_games,
-        output_path=self_play_path,
+    self_play_summary = generate_self_play_games_with_config(
+        SelfPlayConfig(
+            num_games=self_play_games,
+            output_path=self_play_path,
+            temperature_moves=temperature_moves,
+            opening_temperature=opening_temperature,
+            late_temperature=late_temperature,
+            add_root_noise=add_root_noise,
+        )
     )
     replay_buffer = ReplayBuffer(max_samples=replay_buffer_size)
     replay_buffer.load_json(replay_buffer_path)
@@ -55,11 +74,48 @@ def run_alpha_zero_iteration(
         acceptance_threshold=acceptance_threshold,
         promote_on_win=True,
     )
+    resolved_iteration_metadata = Path(iteration_metadata_path).resolve()
+    _save_iteration_metadata(
+        metadata_path=resolved_iteration_metadata,
+        self_play=self_play_summary,
+        training=training_summary,
+        arena=arena_result,
+        replay_buffer_size=replay_buffer.size,
+        replay_buffer_path=Path(replay_buffer_path).resolve(),
+    )
     return AlphaZeroLoopSummary(
         self_play=self_play_summary,
         training=training_summary,
         arena=arena_result,
+        replay_buffer_size=replay_buffer.size,
+        metadata_path=resolved_iteration_metadata,
     )
+
+
+def _save_iteration_metadata(
+    metadata_path: Path,
+    self_play: SelfPlaySummary,
+    training: TrainingSummary,
+    arena: ArenaResult,
+    replay_buffer_size: int,
+    replay_buffer_path: Path,
+) -> None:
+    """Persist one top-level iteration summary for experiment tracking."""
+
+    payload = {
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "self_play_games": self_play.total_games,
+        "self_play_samples": self_play.total_samples,
+        "self_play_output": str(self_play.output_path),
+        "replay_buffer_size": replay_buffer_size,
+        "replay_buffer_path": str(replay_buffer_path),
+        "training_checkpoint": str(training.output_path),
+        "training_metadata": str(training.metadata_path),
+        "arena_metadata": str(arena.metadata_path),
+        "candidate_accepted": arena.accepted,
+    }
+    metadata_path.parent.mkdir(parents=True, exist_ok=True)
+    metadata_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
 def parse_args() -> argparse.Namespace:
@@ -75,6 +131,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--incumbent-model", default="src/model.pth")
     parser.add_argument("--threshold", type=float, default=0.55)
     parser.add_argument("--buffer-size", type=int, default=10_000)
+    parser.add_argument("--temperature-moves", type=int, default=6)
+    parser.add_argument("--opening-temperature", type=float, default=1.0)
+    parser.add_argument("--late-temperature", type=float, default=0.0)
+    parser.add_argument("--disable-root-noise", action="store_true")
+    parser.add_argument("--metadata", default="results/alpha_zero_iteration.json")
     return parser.parse_args()
 
 
@@ -92,11 +153,18 @@ def main() -> None:
         incumbent_model_path=args.incumbent_model,
         acceptance_threshold=args.threshold,
         replay_buffer_size=args.buffer_size,
+        temperature_moves=args.temperature_moves,
+        opening_temperature=args.opening_temperature,
+        late_temperature=args.late_temperature,
+        add_root_noise=not args.disable_root_noise,
+        iteration_metadata_path=args.metadata,
     )
     print("AlphaZero-style iteration complete")
     print(f"Self-play samples: {summary.self_play.total_samples}")
+    print(f"Replay buffer size: {summary.replay_buffer_size}")
     print(f"Training output: {summary.training.output_path}")
     print(f"Arena accepted candidate: {summary.arena.accepted}")
+    print(f"Saved iteration metadata: {summary.metadata_path}")
 
 
 if __name__ == "__main__":

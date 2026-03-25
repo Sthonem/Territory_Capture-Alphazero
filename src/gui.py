@@ -3,13 +3,21 @@
 from __future__ import annotations
 
 import tkinter as tk
+from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 from .ai_agent import AIAgent
+from .agents import RandomAgent
 from .game import GameResult, TerritoryCaptureGame
 from .rules import EMPTY, PLAYER_O, PLAYER_X
 
 Position = Tuple[int, int]
+MODE_HVH = "Human vs Human"
+MODE_HVAI = "Human vs AI"
+MODE_AIVAI = "AI vs AI"
+DIFFICULTY_EASY = "Easy"
+DIFFICULTY_MEDIUM = "Medium"
+DIFFICULTY_HARD = "Hard"
 
 WINDOW_BG = "#050816"
 WINDOW_BG_ALT = "#0b1228"
@@ -36,9 +44,7 @@ TERRITORY_X_WIN = "#183962"
 TERRITORY_O_WIN = "#4b1b31"
 CAPTURE_FLASH = "#6b4f0b"
 CAPTURE_FLASH_TEXT = "#ffd76a"
-MODE_HUMAN_VS_HUMAN = "Human vs Human"
-MODE_HUMAN_VS_AI = "Human vs AI"
-MODE_AI_VS_AI = "AI vs AI"
+EXTERNAL_TRAINED_MODEL_PATH = Path("/Users/erdem/Downloads/model.pth")
 
 
 class TerritoryCaptureGUI:
@@ -56,16 +62,14 @@ class TerritoryCaptureGUI:
         self.current_result: Optional[GameResult] = None
         self.rules_window: Optional[tk.Toplevel] = None
         self.recently_captured_positions: set[Position] = set()
-        self.ai_move_pending = False
-        self.mode_var = tk.StringVar(value=MODE_HUMAN_VS_AI)
+        self.ai_move_delay_ms = 500
         self.ai_error: Optional[str] = None
 
-        try:
-            self.ai = AIAgent()
-        except Exception as exc:
-            self.ai = None
-            self.ai_error = str(exc)
-
+        self.mode_var = tk.StringVar(value=MODE_HVAI)
+        self.difficulty_var = tk.StringVar(value=DIFFICULTY_MEDIUM)
+        self.ai_x_difficulty_var = tk.StringVar(value=DIFFICULTY_MEDIUM)
+        self.ai_o_difficulty_var = tk.StringVar(value=DIFFICULTY_HARD)
+        self.mode_status_var = tk.StringVar()
         self.status_var = tk.StringVar()
         self.score_var = tk.StringVar()
         self.info_var = tk.StringVar(
@@ -74,6 +78,23 @@ class TerritoryCaptureGUI:
         self.legend_var = tk.StringVar(
             value="Stone colors: blue = X, pink = O. Territory appears after the game."
         )
+        self.easy_agent = RandomAgent()
+        self.medium_ai: Optional[AIAgent] = None
+        self.hard_ai: Optional[AIAgent] = None
+        try:
+            self.medium_ai = AIAgent(num_simulations=50)
+            hard_model_path = (
+                EXTERNAL_TRAINED_MODEL_PATH
+                if EXTERNAL_TRAINED_MODEL_PATH.exists()
+                else None
+            )
+            self.hard_ai = AIAgent(
+                model_path=hard_model_path,
+                num_simulations=220,
+            )
+        except Exception as error:  # pragma: no cover - defensive UI fallback
+            self.ai_error = str(error)
+            self.mode_var.set(MODE_HVH)
 
         self.main_frame = tk.Frame(self.root, bg=WINDOW_BG, padx=22, pady=18)
         self.main_frame.pack()
@@ -103,6 +124,7 @@ class TerritoryCaptureGUI:
         self._build_header()
         self._build_board()
         self._build_footer()
+        self._refresh_mode_controls()
         self._refresh_view()
 
     def _build_header(self) -> None:
@@ -139,35 +161,149 @@ class TerritoryCaptureGUI:
 
         action_row = tk.Frame(self.header_frame, bg=WINDOW_BG, pady=10)
         action_row.pack()
+        self.action_row = action_row
+
+        mode_label = tk.Label(
+            action_row,
+            text="Mode",
+            font=("Helvetica", 11, "bold"),
+            fg=TEXT_MUTED,
+            bg=WINDOW_BG,
+        )
+        mode_label.pack(side="left", padx=(0, 8))
 
         mode_menu = tk.OptionMenu(
             action_row,
             self.mode_var,
-            MODE_HUMAN_VS_HUMAN,
-            MODE_HUMAN_VS_AI,
-            MODE_AI_VS_AI,
+            MODE_HVH,
+            MODE_HVAI,
+            MODE_AIVAI,
             command=self._handle_mode_change,
         )
         mode_menu.configure(
             font=("Helvetica", 11, "bold"),
-            bg="#102042",
-            fg="#eaf7ff",
-            activebackground="#173262",
-            activeforeground="#eaf7ff",
+            bg="#101d38",
+            fg=TEXT_PRIMARY,
+            activebackground="#19315b",
+            activeforeground=TEXT_PRIMARY,
             relief=tk.FLAT,
             highlightthickness=1,
-            highlightbackground="#4cc9ff",
-            padx=10,
-            pady=6,
+            highlightbackground=CELL_BORDER,
+            padx=8,
             cursor="hand2",
         )
         mode_menu["menu"].configure(
-            bg="#102042",
-            fg="#eaf7ff",
-            activebackground="#173262",
-            activeforeground="#eaf7ff",
+            bg="#101d38",
+            fg=TEXT_PRIMARY,
+            activebackground="#19315b",
+            activeforeground=TEXT_PRIMARY,
         )
         mode_menu.pack(side="left", padx=6)
+
+        self.difficulty_label = tk.Label(
+            action_row,
+            text="Difficulty",
+            font=("Helvetica", 11, "bold"),
+            fg=TEXT_MUTED,
+            bg=WINDOW_BG,
+        )
+        self.difficulty_label.pack(side="left", padx=(10, 8))
+
+        self.difficulty_menu = tk.OptionMenu(
+            action_row,
+            self.difficulty_var,
+            DIFFICULTY_EASY,
+            DIFFICULTY_MEDIUM,
+            DIFFICULTY_HARD,
+            command=self._handle_difficulty_change,
+        )
+        self.difficulty_menu.configure(
+            font=("Helvetica", 11, "bold"),
+            bg="#101d38",
+            fg=TEXT_PRIMARY,
+            activebackground="#19315b",
+            activeforeground=TEXT_PRIMARY,
+            relief=tk.FLAT,
+            highlightthickness=1,
+            highlightbackground=CELL_BORDER,
+            padx=8,
+            cursor="hand2",
+        )
+        self.difficulty_menu["menu"].configure(
+            bg="#101d38",
+            fg=TEXT_PRIMARY,
+            activebackground="#19315b",
+            activeforeground=TEXT_PRIMARY,
+        )
+        self.difficulty_menu.pack(side="left", padx=6)
+
+        self.ai_x_label = tk.Label(
+            action_row,
+            text="AI X",
+            font=("Helvetica", 11, "bold"),
+            fg=TEXT_MUTED,
+            bg=WINDOW_BG,
+        )
+        self.ai_x_menu = tk.OptionMenu(
+            action_row,
+            self.ai_x_difficulty_var,
+            DIFFICULTY_EASY,
+            DIFFICULTY_MEDIUM,
+            DIFFICULTY_HARD,
+            command=self._handle_difficulty_change,
+        )
+        self.ai_x_menu.configure(
+            font=("Helvetica", 11, "bold"),
+            bg="#101d38",
+            fg=TEXT_PRIMARY,
+            activebackground="#19315b",
+            activeforeground=TEXT_PRIMARY,
+            relief=tk.FLAT,
+            highlightthickness=1,
+            highlightbackground=CELL_BORDER,
+            padx=8,
+            cursor="hand2",
+        )
+        self.ai_x_menu["menu"].configure(
+            bg="#101d38",
+            fg=TEXT_PRIMARY,
+            activebackground="#19315b",
+            activeforeground=TEXT_PRIMARY,
+        )
+
+        self.ai_o_label = tk.Label(
+            action_row,
+            text="AI O",
+            font=("Helvetica", 11, "bold"),
+            fg=TEXT_MUTED,
+            bg=WINDOW_BG,
+        )
+        self.ai_o_menu = tk.OptionMenu(
+            action_row,
+            self.ai_o_difficulty_var,
+            DIFFICULTY_EASY,
+            DIFFICULTY_MEDIUM,
+            DIFFICULTY_HARD,
+            command=self._handle_difficulty_change,
+        )
+        self.ai_o_menu.configure(
+            font=("Helvetica", 11, "bold"),
+            bg="#101d38",
+            fg=TEXT_PRIMARY,
+            activebackground="#19315b",
+            activeforeground=TEXT_PRIMARY,
+            relief=tk.FLAT,
+            highlightthickness=1,
+            highlightbackground=CELL_BORDER,
+            padx=8,
+            cursor="hand2",
+        )
+        self.ai_o_menu["menu"].configure(
+            bg="#101d38",
+            fg=TEXT_PRIMARY,
+            activebackground="#19315b",
+            activeforeground=TEXT_PRIMARY,
+        )
 
         how_to_play_button = tk.Button(
             action_row,
@@ -204,6 +340,16 @@ class TerritoryCaptureGUI:
             cursor="hand2",
         )
         new_game_button.pack(side="left", padx=6)
+
+        mode_status = tk.Label(
+            self.header_frame,
+            textvariable=self.mode_status_var,
+            font=("Helvetica", 11, "bold"),
+            fg=TEXT_ACCENT,
+            bg=WINDOW_BG,
+            pady=4,
+        )
+        mode_status.pack()
 
         status = tk.Label(
             self.header_frame,
@@ -290,19 +436,10 @@ class TerritoryCaptureGUI:
         )
         footer_note.pack()
 
-    def _handle_mode_change(self, _: str) -> None:
-        """Restart the game after the user changes the play mode."""
-
-        self._reset_game()
-
     def _handle_hover(self, position: Position, is_hovered: bool) -> None:
         """Apply a soft glow to hoverable empty cells."""
 
-        if (
-            self.game.is_terminal()
-            or not self.game.is_legal_move(position)
-            or not self._is_human_turn()
-        ):
+        if self.game.is_terminal() or not self.game.is_legal_move(position):
             return
 
         button = self.buttons[position]
@@ -322,10 +459,13 @@ class TerritoryCaptureGUI:
     def _handle_move(self, position: Position) -> None:
         """Apply a human move and update the interface."""
 
-        if not self._is_human_turn() or not self.game.is_legal_move(position):
+        if self._is_ai_turn():
+            return
+        if not self.game.is_legal_move(position):
             return
 
-        self._commit_move(position, actor_name="Human")
+        self._apply_move_and_refresh(position, is_ai_move=False)
+        self._queue_ai_turn_if_needed()
 
     def _reset_game(self) -> None:
         """Start a fresh match."""
@@ -334,13 +474,136 @@ class TerritoryCaptureGUI:
         self.last_move = None
         self.current_result = None
         self.recently_captured_positions = set()
-        self.ai_move_pending = False
         self.info_var.set(
             "Place 8 stones each. Stones with no empty neighbors are removed."
         )
-        self.legend_var.set(self._build_legend_text())
+        self.legend_var.set(
+            "Stone colors: blue = X, pink = O. Territory appears after the game."
+        )
         self._refresh_view()
-        self._schedule_ai_move_if_needed()
+        self._queue_ai_turn_if_needed()
+
+    def _handle_mode_change(self, _selected_mode: str) -> None:
+        """Restart the game when the presentation mode changes."""
+
+        self._refresh_mode_controls()
+        if self._mode_requires_ai() and self._get_active_ai_agent_for_player(PLAYER_O) is None:
+            self.info_var.set(
+                f"AI unavailable, staying in Human vs Human. Details: {self.ai_error}"
+            )
+            self.mode_var.set(MODE_HVH)
+            self._refresh_mode_controls()
+        self._reset_game()
+
+    def _handle_difficulty_change(self, _selected_difficulty: str) -> None:
+        """Restart the game when AI difficulty changes."""
+
+        if self._mode_requires_ai() and self._get_active_ai_agent_for_player(PLAYER_O) is None:
+            self.info_var.set(
+                f"AI unavailable, staying in Human vs Human. Details: {self.ai_error}"
+            )
+            self.mode_var.set(MODE_HVH)
+            self._refresh_mode_controls()
+        self._reset_game()
+
+    def _apply_move_and_refresh(self, position: Position, is_ai_move: bool) -> None:
+        """Apply one move, refresh the board, and show capture feedback."""
+
+        self.game.apply_move(position)
+        self.last_move = position
+        self.current_result = None
+        self.recently_captured_positions = set(self.game.last_captured_positions)
+        actor = "AI" if is_ai_move else "Player"
+        if self.recently_captured_positions:
+            removed_count = len(self.recently_captured_positions)
+            noun = "stone" if removed_count == 1 else "stones"
+            self.info_var.set(f"{actor} move capture: {removed_count} {noun} removed.")
+        else:
+            self.info_var.set(
+                f"{actor} move complete. Stones with no empty neighbors are removed."
+            )
+        self._refresh_view()
+
+        if self.game.is_terminal():
+            self._show_final_result()
+
+    def _queue_ai_turn_if_needed(self) -> None:
+        """Schedule an AI move after the board updates when the mode requires it."""
+
+        if self.game.is_terminal() or not self._is_ai_turn():
+            return
+        self.status_var.set(f"Current turn: Player {self.game.current_player} (AI thinking...)")
+        self.root.after(self.ai_move_delay_ms, self._play_ai_turn)
+
+    def _play_ai_turn(self) -> None:
+        """Let the neural-network agent choose and play one move."""
+
+        active_ai = self._get_active_ai_agent_for_player(self.game.current_player)
+        if active_ai is None or self.game.is_terminal() or not self._is_ai_turn():
+            return
+        action = active_ai.select_action(self.game.clone())
+        self._apply_move_and_refresh(action, is_ai_move=True)
+        self._queue_ai_turn_if_needed()
+
+    def _is_ai_turn(self) -> bool:
+        """Return True when the selected mode expects the current player to be AI-controlled."""
+
+        mode = self.mode_var.get()
+        if self._get_active_ai_agent_for_player(self.game.current_player) is None:
+            return False
+        if mode == MODE_AIVAI:
+            return True
+        if mode == MODE_HVAI:
+            return self.game.current_player == PLAYER_O
+        return False
+
+    def _get_agent_for_difficulty(self, difficulty: str):
+        """Map one difficulty label to its underlying agent."""
+
+        if difficulty == DIFFICULTY_EASY:
+            return self.easy_agent
+        if difficulty == DIFFICULTY_HARD:
+            return self.hard_ai
+        return self.medium_ai
+
+    def _get_active_ai_agent_for_player(self, player: str):
+        """Return the AI controller assigned to the given player."""
+
+        mode = self.mode_var.get()
+        if mode == MODE_HVAI:
+            return self._get_agent_for_difficulty(self.difficulty_var.get())
+        if mode == MODE_AIVAI:
+            if player == PLAYER_X:
+                return self._get_agent_for_difficulty(self.ai_x_difficulty_var.get())
+            return self._get_agent_for_difficulty(self.ai_o_difficulty_var.get())
+        return None
+
+    def _mode_requires_ai(self) -> bool:
+        """Return True when at least one side is AI-controlled."""
+
+        return self.mode_var.get() in {MODE_HVAI, MODE_AIVAI}
+
+    def _refresh_mode_controls(self) -> None:
+        """Show only the difficulty controls relevant to the current mode."""
+
+        for widget in (
+            self.difficulty_label,
+            self.difficulty_menu,
+            self.ai_x_label,
+            self.ai_x_menu,
+            self.ai_o_label,
+            self.ai_o_menu,
+        ):
+            widget.pack_forget()
+
+        if self.mode_var.get() == MODE_HVAI:
+            self.difficulty_label.pack(side="left", padx=(10, 8))
+            self.difficulty_menu.pack(side="left", padx=6)
+        elif self.mode_var.get() == MODE_AIVAI:
+            self.ai_x_label.pack(side="left", padx=(10, 8))
+            self.ai_x_menu.pack(side="left", padx=6)
+            self.ai_o_label.pack(side="left", padx=(10, 8))
+            self.ai_o_menu.pack(side="left", padx=6)
 
     def _refresh_view(self) -> None:
         """Redraw board cells and status text."""
@@ -360,8 +623,26 @@ class TerritoryCaptureGUI:
             self.status_var.set("Game finished")
         else:
             self.status_var.set(f"Current turn: Player {self.game.current_player}")
-            if self.ai_error is not None:
-                self.status_var.set(f"{self.status_var.get()}  |  AI unavailable")
+
+        mode_text = self.mode_var.get()
+        if self._mode_requires_ai() and self._get_active_ai_agent_for_player(PLAYER_O) is None:
+            mode_text += " | AI unavailable"
+        elif mode_text == MODE_HVAI:
+            mode_text += f" | Human = X, AI = O | {self.difficulty_var.get()}"
+        elif mode_text == MODE_AIVAI:
+            mode_text += (
+                f" | AI X = {self.ai_x_difficulty_var.get()} | "
+                f"AI O = {self.ai_o_difficulty_var.get()}"
+            )
+        else:
+            mode_text += " | Local two-player board"
+        if EXTERNAL_TRAINED_MODEL_PATH.exists() and (
+            self.difficulty_var.get() == DIFFICULTY_HARD
+            or self.ai_x_difficulty_var.get() == DIFFICULTY_HARD
+            or self.ai_o_difficulty_var.get() == DIFFICULTY_HARD
+        ):
+            mode_text += " | 100k-trained model"
+        self.mode_status_var.set(mode_text)
 
         self.score_var.set(
             f"Moves: {self.game.move_count}/{self.game.max_moves}    "
@@ -459,7 +740,7 @@ class TerritoryCaptureGUI:
                 fg=TEXT_PRIMARY,
                 activebackground=CELL_EMPTY_HOVER,
                 activeforeground=TEXT_PRIMARY,
-                state=tk.NORMAL if self._is_human_turn() else tk.DISABLED,
+                state=tk.NORMAL,
                 highlightbackground=CELL_BORDER,
             )
 
@@ -737,95 +1018,6 @@ class TerritoryCaptureGUI:
         """Start the Tkinter event loop."""
 
         self.root.mainloop()
-
-    def _build_legend_text(self) -> str:
-        """Return a legend string that reflects the selected mode."""
-
-        mode = self.mode_var.get()
-        if self.ai_error is not None:
-            return (
-                "Stone colors: blue = X, pink = O. "
-                f"AI disabled: {self.ai_error}"
-            )
-        if mode == MODE_HUMAN_VS_AI:
-            return "Mode: Human controls X, AI controls O."
-        if mode == MODE_AI_VS_AI:
-            return "Mode: AI controls both X and O."
-        return "Mode: Human controls both X and O."
-
-    def _is_ai_player(self, player: str) -> bool:
-        """Return True when the given player should be controlled by AI."""
-
-        if self.ai is None:
-            return False
-
-        mode = self.mode_var.get()
-        if mode == MODE_AI_VS_AI:
-            return True
-        if mode == MODE_HUMAN_VS_AI and player == PLAYER_O:
-            return True
-        return False
-
-    def _is_human_turn(self) -> bool:
-        """Return True when the current turn should accept human input."""
-
-        return (
-            not self.game.is_terminal()
-            and not self.ai_move_pending
-            and not self._is_ai_player(self.game.current_player)
-        )
-
-    def _schedule_ai_move_if_needed(self) -> None:
-        """Schedule an AI turn for smoother UX."""
-
-        if self.game.is_terminal() or self.ai_move_pending:
-            return
-        if not self._is_ai_player(self.game.current_player):
-            return
-
-        self.ai_move_pending = True
-        self._refresh_view()
-        self.root.after(500, self._run_ai_turn)
-
-    def _run_ai_turn(self) -> None:
-        """Ask the AI for a move and apply it."""
-
-        self.ai_move_pending = False
-        if self.game.is_terminal() or self.ai is None:
-            self._refresh_view()
-            return
-        if not self._is_ai_player(self.game.current_player):
-            self._refresh_view()
-            return
-
-        action = self.ai.select_action(self.game)
-        self._commit_move(action, actor_name="AI")
-
-    def _commit_move(self, position: Position, actor_name: str) -> None:
-        """Apply one move and handle follow-up UI updates."""
-
-        self.game.apply_move(position)
-        self.last_move = position
-        self.current_result = None
-        self.recently_captured_positions = set(self.game.last_captured_positions)
-
-        if self.recently_captured_positions:
-            removed_count = len(self.recently_captured_positions)
-            noun = "stone" if removed_count == 1 else "stones"
-            self.info_var.set(
-                f"{actor_name} played {position}. Capture resolved: "
-                f"{removed_count} {noun} removed."
-            )
-        else:
-            self.info_var.set(f"{actor_name} played {position}.")
-
-        self._refresh_view()
-
-        if self.game.is_terminal():
-            self._show_final_result()
-            return
-
-        self._schedule_ai_move_if_needed()
 
 
 def main() -> None:
