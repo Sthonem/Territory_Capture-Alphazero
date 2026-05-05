@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+*.egg-info/
+dist/
+build/
+.env
+
+# Large dataset files
+*.json
+!results/*.json
+!src/model.metadata.json
+
+# Temporary model checkpoints
+src/latest_model_test.pth
