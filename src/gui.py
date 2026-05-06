@@ -254,6 +254,7 @@ class PygameGUI:
         if not self.game.is_terminal() and not self._is_ai_turn():
             cell = self._px_to_cell(pos)
             if cell and self.game.is_legal_move(cell):
+                self._notify_agents_of_move(cell)
                 self._apply_move(cell)
 
     def _px_to_cell(self, pos: tuple) -> Optional[Position]:
@@ -291,6 +292,11 @@ class PygameGUI:
                 self.ai_waiting = True
                 self.ai_at     = pygame.time.get_ticks() + AI_DELAY_MS
 
+    def _notify_agents_of_move(self, action: Position) -> None:
+        for agent in self.agents.values():
+            if hasattr(agent, "mcts"):
+                agent.mcts.advance_to_action(action)
+
     def _do_ai_move(self) -> None:
         diff_idx = self.diff_x if self.game.current_player == PLAYER_X else self.diff_o
         agent = self.agents[DIFFS[diff_idx]]
@@ -306,6 +312,9 @@ class PygameGUI:
         self.show_result = False
         self.ai_waiting  = False
         self.status      = "Player X — place your first stone"
+        for agent in self.agents.values():
+            if hasattr(agent, "reset_search_tree"):
+                agent.reset_search_tree()
 
         if self._is_ai_turn():
             self.status    = "AI thinking...  (Player X)"
