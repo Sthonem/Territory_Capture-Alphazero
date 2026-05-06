@@ -9,26 +9,37 @@ import pygame
 
 from .agents import HeuristicAgent, MinimaxAgent, RandomAgent
 from .ai_agent import AIAgent
+from .encoding import BOARD_CONFIGS
 from .game import GameResult, TerritoryCaptureGame
 from .rules import EMPTY, PLAYER_O, PLAYER_X
 
 # ── Geometry ──────────────────────────────────────────────────────────────────
 WIN_W, WIN_H = 1000, 720
-CELL         = 80
-BS           = 6
-BOARD_PX     = CELL * BS                   # 480
-BOARD_X      = (WIN_W - BOARD_PX) // 2    # 260
 BOARD_Y      = 100
-BOARD_PY     = BOARD_PX                   # 480
 
-PANEL_W    = BOARD_X - 20                 # 240
-L_PANEL_X  = 10
-R_PANEL_X  = BOARD_X + BOARD_PX + 10     # 750
-PANEL_Y    = BOARD_Y
-PANEL_H    = BOARD_PY                     # 480
+BOARD_SIZES  = [5, 6, 7]
+DEFAULT_BS   = 6
 
-FOOTER_Y   = BOARD_Y + BOARD_PY + 16     # 596
-FOOTER_H   = WIN_H - FOOTER_Y            # 124
+
+def _calc_geometry(bs: int) -> dict:
+    """Compute dynamic layout values for a given board size."""
+    cell = max(60, min(80, 480 // bs))
+    board_px = cell * bs
+    board_x = (WIN_W - board_px) // 2
+    panel_w = board_x - 20
+    return {
+        "cell": cell,
+        "bs": bs,
+        "board_px": board_px,
+        "board_x": board_x,
+        "panel_w": panel_w,
+        "l_panel_x": 10,
+        "r_panel_x": board_x + board_px + 10,
+        "panel_y": BOARD_Y,
+        "panel_h": board_px,
+        "footer_y": BOARD_Y + board_px + 16,
+        "footer_h": WIN_H - (BOARD_Y + board_px + 16),
+    }
 
 # ── Palette ───────────────────────────────────────────────────────────────────
 BG         = (5,   8,  22)
@@ -131,7 +142,13 @@ class PygameGUI:
         pygame.display.set_caption("Territory Capture")
         self.clock  = pygame.time.Clock()
 
-        self.game      = TerritoryCaptureGame()
+        self.bs_index = BOARD_SIZES.index(DEFAULT_BS)
+        self.bs       = DEFAULT_BS
+        self.geo      = _calc_geometry(self.bs)
+
+        config = BOARD_CONFIGS.get(self.bs, {})
+        stones = config.get("stones_per_player", 10)
+        self.game      = TerritoryCaptureGame(board_size=self.bs, stones_per_player=stones)
         self.result:   Optional[GameResult] = None
         self.last_move: Optional[Position]  = None
         self.flashes:  List[_Flash]         = []
@@ -164,25 +181,35 @@ class PygameGUI:
         self.F_SCORE = f(28, True)
 
     def _init_agents(self) -> None:
+        config = BOARD_CONFIGS.get(self.bs, {})
+        model_file = config.get("model_file", f"model_{self.bs}x{self.bs}.pth")
+        hard_path = f"src/model_hard_{self.bs}x{self.bs}.pth"
         self.agents = {
             DIFF_EASY: RandomAgent(),
-            DIFF_MED:  AIAgent(),
-            DIFF_HARD: AIAgent(model_path="src/model_hard.pth", num_simulations=100),
+            DIFF_MED:  AIAgent(board_size=self.bs),
+            DIFF_HARD: AIAgent(board_size=self.bs, model_path=hard_path, num_simulations=100)
+                       if __import__("pathlib").Path(hard_path).exists()
+                       else AIAgent(board_size=self.bs, num_simulations=100),
         }
 
     def _init_buttons(self) -> None:
+        g = self.geo
         bh = 42
-        by = FOOTER_Y + (FOOTER_H - bh) // 2
-        self.btn_new   = _Btn(pygame.Rect( 30, by, 148, bh), "New Game",    COL_X,   COL_X,    self.F_H2)
-        self.btn_mode  = _Btn(pygame.Rect(188, by, 210, bh), self._mode_lbl(), VIOLET, TEXT_PRI, self.F_H2)
-        self.btn_diff_x = _Btn(pygame.Rect(408, by, 148, bh), self._diff_x_lbl(), COL_X, TEXT_PRI, self.F_H2)
-        self.btn_diff_o = _Btn(pygame.Rect(566, by, 148, bh), self._diff_o_lbl(), COL_O, TEXT_PRI, self.F_H2)
-        self.btn_rules  = _Btn(pygame.Rect(724, by, 148, bh), "How to Play", VIOLET, TEXT_PRI, self.F_H2)
-        self._btns      = [self.btn_new, self.btn_mode, self.btn_diff_x, self.btn_diff_o, self.btn_rules]
+        by = g["footer_y"] + (g["footer_h"] - bh) // 2
+        self.btn_new    = _Btn(pygame.Rect( 15, by, 120, bh), "New Game",         COL_X,  COL_X,   self.F_H2)
+        self.btn_mode   = _Btn(pygame.Rect(140, by, 160, bh), self._mode_lbl(),   VIOLET, TEXT_PRI, self.F_H2)
+        self.btn_board  = _Btn(pygame.Rect(305, by, 110, bh), self._board_lbl(),  GOLD,   TEXT_PRI, self.F_H2)
+        self.btn_diff_x = _Btn(pygame.Rect(420, by, 120, bh), self._diff_x_lbl(), COL_X,  TEXT_PRI, self.F_H2)
+        self.btn_diff_o = _Btn(pygame.Rect(545, by, 120, bh), self._diff_o_lbl(), COL_O,  TEXT_PRI, self.F_H2)
+        self.btn_rules  = _Btn(pygame.Rect(670, by, 130, bh), "How to Play",      VIOLET, TEXT_PRI, self.F_H2)
+        self._btns      = [self.btn_new, self.btn_mode, self.btn_board, self.btn_diff_x, self.btn_diff_o, self.btn_rules]
 
     def _mode_lbl(self) -> str:
         short = {MODE_HVH: "H vs H", MODE_HVAI: "H vs AI", MODE_AIVAI: "AI vs AI"}
         return f"Mode: {short[MODES[self.mode_i]]}"
+
+    def _board_lbl(self) -> str:
+        return f"Board: {self.bs}x{self.bs}"
 
     def _diff_x_lbl(self) -> str:
         return f"X: {DIFFS[self.diff_x]}"
@@ -237,6 +264,14 @@ class PygameGUI:
             self.btn_mode.text = self._mode_lbl()
             self._reset()
             return
+        if self.btn_board.hit(pos):
+            self.bs_index = (self.bs_index + 1) % len(BOARD_SIZES)
+            self.bs = BOARD_SIZES[self.bs_index]
+            self.geo = _calc_geometry(self.bs)
+            self._init_agents()
+            self._init_buttons()
+            self._reset()
+            return
         if self.btn_diff_x.hit(pos):
             self.diff_x = (self.diff_x + 1) % len(DIFFS)
             self.btn_diff_x.text = self._diff_x_lbl()
@@ -258,11 +293,13 @@ class PygameGUI:
                 self._apply_move(cell)
 
     def _px_to_cell(self, pos: tuple) -> Optional[Position]:
+        g = self.geo
         x, y = pos
-        if BOARD_X <= x < BOARD_X + BOARD_PX and BOARD_Y <= y < BOARD_Y + BOARD_PY:
-            col = (x - BOARD_X) // CELL
-            row = (y - BOARD_Y) // CELL
-            if 0 <= row < BS and 0 <= col < BS:
+        bx, bpx, cell, bs = g["board_x"], g["board_px"], g["cell"], g["bs"]
+        if bx <= x < bx + bpx and BOARD_Y <= y < BOARD_Y + bpx:
+            col = (x - bx) // cell
+            row = (y - BOARD_Y) // cell
+            if 0 <= row < bs and 0 <= col < bs:
                 return (row, col)
         return None
 
@@ -304,7 +341,9 @@ class PygameGUI:
         self._apply_move(action)
 
     def _reset(self) -> None:
-        self.game.reset()
+        config = BOARD_CONFIGS.get(self.bs, {})
+        stones = config.get("stones_per_player", 10)
+        self.game = TerritoryCaptureGame(board_size=self.bs, stones_per_player=stones)
         self.result      = None
         self.last_move   = None
         self.flashes.clear()
@@ -332,11 +371,12 @@ class PygameGUI:
     # ── Drawing ───────────────────────────────────────────────────────────────
 
     def _draw(self) -> None:
+        g = self.geo
         self.screen.fill(BG)
         self._draw_header()
-        self._draw_panel(PLAYER_X, L_PANEL_X)
+        self._draw_panel(PLAYER_X, g["l_panel_x"])
         self._draw_board()
-        self._draw_panel(PLAYER_O, R_PANEL_X)
+        self._draw_panel(PLAYER_O, g["r_panel_x"])
         self._draw_footer()
         if self.show_rules:
             self._draw_rules_overlay()
@@ -357,8 +397,10 @@ class PygameGUI:
     # ── Player panel ─────────────────────────────────────────────────────────
 
     def _draw_panel(self, player: str, px: int) -> None:
+        g = self.geo
+        pw, ph, py_top = g["panel_w"], g["panel_h"], g["panel_y"]
         color  = COL_X if player == PLAYER_X else COL_O
-        rect   = pygame.Rect(px, PANEL_Y, PANEL_W, PANEL_H)
+        rect   = pygame.Rect(px, py_top, pw, ph)
         border = tuple(c // 2 for c in color)
         _rrect(self.screen, PANEL_BG, rect, 12, 1, border)
 
@@ -366,13 +408,13 @@ class PygameGUI:
         is_current = (not self.game.is_terminal()
                       and self.game.current_player == player)
         if is_current:
-            gsurf = pygame.Surface((PANEL_W, PANEL_H), pygame.SRCALPHA)
-            pygame.draw.rect(gsurf, (*color, 14), (0, 0, PANEL_W, PANEL_H),
+            gsurf = pygame.Surface((pw, ph), pygame.SRCALPHA)
+            pygame.draw.rect(gsurf, (*color, 14), (0, 0, pw, ph),
                              border_radius=12)
             self.screen.blit(gsurf, rect.topleft)
 
-        cx = px + PANEL_W // 2
-        y  = PANEL_Y + 22
+        cx = px + pw // 2
+        y  = py_top + 22
 
         # Player name
         lbl = self.F_H1.render(f"Player  {player}", True, color)
@@ -414,15 +456,16 @@ class PygameGUI:
         )
         y += 20
         stones = self.game.stones_placed[player]
-        sv = self.F_SCORE.render(f"{stones} / 10", True, color)
+        max_stones = self.game.stones_per_player
+        sv = self.F_SCORE.render(f"{stones} / {max_stones}", True, color)
         self.screen.blit(sv, sv.get_rect(centerx=cx, y=y))
         y += 36
 
         # Progress bar
-        bw = PANEL_W - 30
+        bw = pw - 30
         bar = pygame.Rect(px + 15, y, bw, 7)
         pygame.draw.rect(self.screen, GRID_C, bar, border_radius=3)
-        fw = int(bw * stones / 10)
+        fw = int(bw * stones / max_stones) if max_stones > 0 else 0
         if fw > 0:
             pygame.draw.rect(self.screen, color,
                              pygame.Rect(px + 15, y, fw, 7), border_radius=3)
@@ -475,19 +518,21 @@ class PygameGUI:
     # ── Board ─────────────────────────────────────────────────────────────────
 
     def _draw_board(self) -> None:
+        g = self.geo
+        bx, bpx, cell, bs = g["board_x"], g["board_px"], g["cell"], g["bs"]
         board_rect = pygame.Rect(
-            BOARD_X - 14, BOARD_Y - 14,
-            BOARD_PX + 28, BOARD_PY + 28,
+            bx - 14, BOARD_Y - 14,
+            bpx + 28, bpx + 28,
         )
         _rrect(self.screen, PANEL_BG, board_rect, 14, 1, GRID_C)
 
         mouse = pygame.mouse.get_pos()
 
-        for row in range(BS):
-            for col in range(BS):
-                cx = BOARD_X + col * CELL + CELL // 2
-                cy = BOARD_Y + row * CELL + CELL // 2
-                crect = pygame.Rect(BOARD_X + col * CELL, BOARD_Y + row * CELL, CELL, CELL)
+        for row in range(bs):
+            for col in range(bs):
+                cx = bx + col * cell + cell // 2
+                cy = BOARD_Y + row * cell + cell // 2
+                crect = pygame.Rect(bx + col * cell, BOARD_Y + row * cell, cell, cell)
                 val   = self.game.board[row][col]
                 is_last = self.last_move == (row, col)
 
@@ -505,7 +550,7 @@ class PygameGUI:
                         TER_N  if t_owner == EMPTY   else None
                     )
                     if tcol:
-                        ov = pygame.Surface((CELL, CELL), pygame.SRCALPHA)
+                        ov = pygame.Surface((cell, cell), pygame.SRCALPHA)
                         ov.fill((*tcol, self.ter_alpha // 3))
                         self.screen.blit(ov, crect.topleft)
 
@@ -513,7 +558,7 @@ class PygameGUI:
                 for fl in self.flashes:
                     if fl.pos == (row, col):
                         a = fl.alpha()
-                        fs = pygame.Surface((CELL, CELL), pygame.SRCALPHA)
+                        fs = pygame.Surface((cell, cell), pygame.SRCALPHA)
                         fs.fill((*CAP_COL, a))
                         self.screen.blit(fs, crect.topleft)
 
@@ -538,14 +583,15 @@ class PygameGUI:
                             and not self.game.is_terminal()
                             and not self._is_ai_turn()
                             and self.game.is_legal_move((row, col))):
-                        hov = pygame.Surface((CELL, CELL), pygame.SRCALPHA)
+                        hov = pygame.Surface((cell, cell), pygame.SRCALPHA)
                         hov.fill((255, 255, 255, 16))
                         self.screen.blit(hov, crect.topleft)
                         hint_col = COL_X if self.game.current_player == PLAYER_X else COL_O
                         pygame.draw.circle(self.screen, (*hint_col, 70), (cx, cy), 10)
 
     def _draw_stone(self, cx: int, cy: int, color: tuple, highlighted: bool) -> None:
-        radius = CELL // 2 - 8   # 32
+        cell = self.geo["cell"]
+        radius = cell // 2 - 8
 
         # Glow layers
         glow_a = 95 if highlighted else 55
@@ -574,23 +620,26 @@ class PygameGUI:
     # ── Footer ────────────────────────────────────────────────────────────────
 
     def _draw_footer(self) -> None:
+        g = self.geo
+        fy, fh = g["footer_y"], g["footer_h"]
         pygame.draw.rect(self.screen, (7, 12, 28),
-                         pygame.Rect(0, FOOTER_Y, WIN_W, FOOTER_H))
-        pygame.draw.line(self.screen, GRID_C, (0, FOOTER_Y), (WIN_W, FOOTER_Y), 1)
+                         pygame.Rect(0, fy, WIN_W, fh))
+        pygame.draw.line(self.screen, GRID_C, (0, fy), (WIN_W, fy), 1)
 
         for btn in self._btns:
             btn.draw(self.screen)
 
         # Right-side info
+        max_moves = self.game.stones_per_player * 2
         info = (
-            f"Move {self.game.move_count}/20     "
+            f"{self.bs}x{self.bs}  Move {self.game.move_count}/{max_moves}     "
             f"Capture bonus  X +{self.game.captured_by[PLAYER_X]}"
             f"   O +{self.game.captured_by[PLAYER_O]}"
         )
         inf_surf = self.F_SMALL.render(info, True, TEXT_MUT)
         self.screen.blit(
             inf_surf,
-            inf_surf.get_rect(right=WIN_W - 20, centery=FOOTER_Y + FOOTER_H // 2),
+            inf_surf.get_rect(right=WIN_W - 20, centery=fy + fh // 2),
         )
 
     # ── Rules overlay ─────────────────────────────────────────────────────────
@@ -612,14 +661,20 @@ class PygameGUI:
         self.screen.blit(title, title.get_rect(centerx=cx, y=y))
         y += 38
 
+        config = BOARD_CONFIGS.get(self.bs, {})
+        stones = config.get("stones_per_player", 10)
+        if self.bs % 2 == 1:
+            center_desc = "center 1 cell decides"
+        else:
+            center_desc = "center 4 cells decide"
         rows = [
-            ("Board",     "6 × 6 grid — two players, X (blue) and O (pink)"),
-            ("Stones",    "Each player places 10 stones — 20 moves total"),
-            ("Capture",   "A stone is removed when opponent neighbours ≥ 2"),
+            ("Board",     f"{self.bs} x {self.bs} grid — two players, X (blue) and O (pink)"),
+            ("Stones",    f"Each player places {stones} stones — {stones * 2} moves total"),
+            ("Capture",   "A stone is removed when opponent neighbours >= 2"),
             ("",          "AND outnumber its friendly neighbours"),
             ("Bonus",     "Each captured opponent stone = +1 score point"),
             ("Territory", "Empty cells scored by neighbour-stone majority"),
-            ("Tiebreak",  "If tied, center 4 cells decide — still tied = draw"),
+            ("Tiebreak",  f"If tied, {center_desc} — still tied = draw"),
             ("Goal",      "Highest territory + capture total wins"),
         ]
 

@@ -77,6 +77,7 @@ def train_policy_value_model(
     scheduler_step_size: int = 3,
     scheduler_gamma: float = 0.5,
     metadata_path: str | Path | None = None,
+    board_size: int = 6,
 ) -> TrainingSummary:
     """Train the policy-value network on self-play data."""
 
@@ -86,7 +87,7 @@ def train_policy_value_model(
         records = load_self_play_records(data_path)
 
     dataset = SelfPlayDataset(records)
-    model = (model or PolicyValueNet()).to(device)
+    model = (model or PolicyValueNet(board_size=board_size)).to(device)
 
     train_loader, validation_loader = _build_dataloaders(
         dataset=dataset,
@@ -254,6 +255,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scheduler-step", type=int, default=3)
     parser.add_argument("--scheduler-gamma", type=float, default=0.5)
     parser.add_argument("--metadata", default=None)
+    parser.add_argument("--board-size", type=int, default=6, choices=[5, 6, 7],
+                        help="Board size (5, 6, or 7).")
     return parser.parse_args()
 
 
@@ -270,6 +273,7 @@ def main() -> None:
         scheduler_step_size=args.scheduler_step,
         scheduler_gamma=args.scheduler_gamma,
         metadata_path=args.metadata,
+        board_size=args.board_size,
     )
     print("Training complete")
     print(f"Epochs: {summary.epochs}")

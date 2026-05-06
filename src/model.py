@@ -6,8 +6,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .encoding import ACTION_SPACE_SIZE, BOARD_SIZE
-
 
 class ResBlock(nn.Module):
     """Standard residual block for small board-state feature extraction."""
@@ -30,10 +28,18 @@ class ResBlock(nn.Module):
 
 
 class PolicyValueNet(nn.Module):
-    """Joint policy and value network for 6x6 Territory Capture states."""
+    """Joint policy and value network for Territory Capture states."""
 
-    def __init__(self, in_channels: int = 2, channels: int = 64, num_blocks: int = 5) -> None:
+    def __init__(
+        self,
+        board_size: int = 6,
+        in_channels: int = 2,
+        channels: int = 64,
+        num_blocks: int = 5,
+    ) -> None:
         super().__init__()
+        self.board_size = board_size
+        action_space = board_size * board_size
 
         self.conv_in = nn.Conv2d(in_channels, channels, 3, padding=1, bias=False)
         self.bn_in = nn.BatchNorm2d(channels)
@@ -43,11 +49,11 @@ class PolicyValueNet(nn.Module):
 
         self.policy_conv = nn.Conv2d(channels, 2, 1, bias=False)
         self.policy_bn = nn.BatchNorm2d(2)
-        self.policy_fc = nn.Linear(2 * BOARD_SIZE * BOARD_SIZE, ACTION_SPACE_SIZE)
+        self.policy_fc = nn.Linear(2 * board_size * board_size, action_space)
 
         self.value_conv = nn.Conv2d(channels, 1, 1, bias=False)
         self.value_bn = nn.BatchNorm2d(1)
-        self.value_fc1 = nn.Linear(BOARD_SIZE * BOARD_SIZE, 64)
+        self.value_fc1 = nn.Linear(board_size * board_size, 64)
         self.value_fc2 = nn.Linear(64, 1)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:

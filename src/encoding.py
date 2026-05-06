@@ -17,21 +17,32 @@ Position = Tuple[int, int]
 EncodedState = List[List[List[int]]]
 ActionMask = List[int]
 
+# Default board size — overridable per function call.
 BOARD_SIZE = 6
 ACTION_SPACE_SIZE = BOARD_SIZE * BOARD_SIZE
+
+# Board-size configuration for multi-board support.
+BOARD_CONFIGS = {
+    5: {"stones_per_player": 8, "model_file": "model_5x5.pth"},
+    6: {"stones_per_player": 10, "model_file": "model_6x6.pth"},
+    7: {"stones_per_player": 12, "model_file": "model_7x7.pth"},
+}
+
+
+def action_space_for(board_size: int) -> int:
+    """Return the action space size for a given board size."""
+    return board_size * board_size
 
 
 def encode_state(game: TerritoryCaptureGame) -> EncodedState:
     """Encode the board from the current player's perspective.
 
-    The output shape is always (2, 6, 6):
+    The output shape is always (2, N, N) where N is the board size:
     - channel 0: stones belonging to the current player
     - channel 1: stones belonging to the opponent
 
     Empty cells are encoded as 0 in both channels.
     """
-
-    _validate_board_size(game)
 
     current_player = game.current_player
     opponent = PLAYER_O if current_player == PLAYER_X else PLAYER_X
@@ -44,49 +55,46 @@ def encode_state(game: TerritoryCaptureGame) -> EncodedState:
 def encode_state_with_turn_plane(game: TerritoryCaptureGame) -> EncodedState:
     """Encode the board using fixed player channels plus a turn plane.
 
-    The output shape is always (3, 6, 6):
+    The output shape is always (3, N, N):
     - channel 0: X stones
     - channel 1: O stones
     - channel 2: all ones if it is X's turn, else all zeros
-
-    This format is convenient for deep learning pipelines that want a stable,
-    absolute player representation rather than a current-player-relative view.
     """
 
-    _validate_board_size(game)
-
+    bs = game.board_size
     x_channel = _encode_player_channel(game, PLAYER_X)
     o_channel = _encode_player_channel(game, PLAYER_O)
     turn_value = 1 if game.current_player == PLAYER_X else 0
-    turn_channel = [[turn_value for _ in range(BOARD_SIZE)] for _ in range(BOARD_SIZE)]
+    turn_channel = [[turn_value for _ in range(bs)] for _ in range(bs)]
     return [x_channel, o_channel, turn_channel]
 
 
-def action_to_index(action: Position) -> int:
+def action_to_index(action: Position, board_size: int = BOARD_SIZE) -> int:
     """Convert a board coordinate into a fixed action index."""
 
     row, col = action
-    if not (0 <= row < BOARD_SIZE and 0 <= col < BOARD_SIZE):
+    if not (0 <= row < board_size and 0 <= col < board_size):
         raise ValueError(f"Action out of bounds: {action}")
-    return row * BOARD_SIZE + col
+    return row * board_size + col
 
 
-def index_to_action(index: int) -> Position:
+def index_to_action(index: int, board_size: int = BOARD_SIZE) -> Position:
     """Convert a fixed action index back into a board coordinate."""
 
-    if not (0 <= index < ACTION_SPACE_SIZE):
+    action_space = board_size * board_size
+    if not (0 <= index < action_space):
         raise ValueError(f"Action index out of bounds: {index}")
-    return divmod(index, BOARD_SIZE)
+    return divmod(index, board_size)
 
 
 def get_legal_action_mask(game: TerritoryCaptureGame) -> ActionMask:
-    """Return a fixed-size mask over the 36 possible board actions."""
+    """Return a fixed-size mask over possible board actions."""
 
-    _validate_board_size(game)
-
-    mask = [0] * ACTION_SPACE_SIZE
+    bs = game.board_size
+    action_space = bs * bs
+    mask = [0] * action_space
     for action in game.get_legal_actions():
-        mask[action_to_index(action)] = 1
+        mask[action_to_index(action, bs)] = 1
     return mask
 
 
@@ -100,13 +108,3 @@ def _encode_player_channel(
     for row in game.board_state:
         channel.append([1 if cell == player else 0 for cell in row])
     return channel
-
-
-def _validate_board_size(game: TerritoryCaptureGame) -> None:
-    """Keep the representation layer explicit about its fixed input size."""
-
-    if game.board_size != BOARD_SIZE:
-        raise ValueError(
-            f"Encoding expects a {BOARD_SIZE}x{BOARD_SIZE} board, "
-            f"received {game.board_size}x{game.board_size}."
-        )

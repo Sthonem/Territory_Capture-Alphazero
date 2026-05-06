@@ -42,10 +42,11 @@ def generate_self_play_games(
     opening_temperature: float = 1.0,
     late_temperature: float = 0.0,
     add_root_noise: bool = True,
+    board_size: int = 6,
 ) -> SelfPlaySummary:
     """Generate self-play data using MCTS visit-count policies."""
 
-    agent = agent or AIAgent()
+    agent = agent or AIAgent(board_size=board_size)
     destination = Path(output_path).resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
 
@@ -57,12 +58,17 @@ def generate_self_play_games(
 
         for _ in range(num_games):
             agent.reset_search_tree()
+            from .encoding import BOARD_CONFIGS
+            config = BOARD_CONFIGS.get(board_size, {})
+            stones = config.get("stones_per_player", 10)
             records = _play_self_play_game(
                 agent,
                 temperature_moves=temperature_moves,
                 opening_temperature=opening_temperature,
                 late_temperature=late_temperature,
                 add_root_noise=add_root_noise,
+                board_size=board_size,
+                stones_per_player=stones,
             )
             total_samples += len(records)
 
@@ -104,10 +110,12 @@ def _play_self_play_game(
     opening_temperature: float,
     late_temperature: float,
     add_root_noise: bool,
+    board_size: int = 6,
+    stones_per_player: int = 10,
 ) -> List[Dict]:
     """Play one self-play game and return JSON-ready move records."""
 
-    game = TerritoryCaptureGame()
+    game = TerritoryCaptureGame(board_size=board_size, stones_per_player=stones_per_player)
     move_records: List[Dict] = []
 
     while not game.is_terminal():
