@@ -166,8 +166,8 @@ class PygameGUI:
     def _init_agents(self) -> None:
         self.agents = {
             DIFF_EASY: RandomAgent(),
-            DIFF_MED:  MinimaxAgent(depth=2),
-            DIFF_HARD: AIAgent(),
+            DIFF_MED:  AIAgent(),
+            DIFF_HARD: AIAgent(model_path="src/model_hard.pth", num_simulations=100),
         }
 
     def _init_buttons(self) -> None:

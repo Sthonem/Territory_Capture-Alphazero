@@ -113,6 +113,7 @@ def train_policy_value_model(
             training=False,
         )
         current_lr = optimizer.param_groups[0]["lr"]
+        print(f"Epoch {epoch_index + 1}/{epochs} — train_loss: {train_loss:.4f}, val_loss: {validation_loss:.4f}, lr: {current_lr:.6f}", flush=True)
         history.append(
             EpochMetrics(
                 epoch=epoch_index + 1,
