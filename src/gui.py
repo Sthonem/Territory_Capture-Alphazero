@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 import pygame
@@ -160,8 +161,16 @@ class PygameGUI:
         self.diff_o  = 2   # O difficulty index (H vs AI / AI vs AI)
         self.show_rules  = False
         self.show_result = False
+        self.show_advanced = False
         self.ai_waiting  = False
         self.ai_at       = 0
+
+        # Cross-board model overrides per player (None = native to current board).
+        # When set to 5/6/7, the AI for that player uses a model trained on a
+        # different board size, wrapped in CrossBoardAgent.
+        self.x_src_bs: Optional[int] = None
+        self.o_src_bs: Optional[int] = None
+        self._adv_buttons: List["_Btn"] = []  # populated when overlay opens
 
         self._init_fonts()
         self._init_agents()
@@ -181,28 +190,55 @@ class PygameGUI:
         self.F_SCORE = f(28, True)
 
     def _init_agents(self) -> None:
-        config = BOARD_CONFIGS.get(self.bs, {})
-        model_file = config.get("model_file", f"model_{self.bs}x{self.bs}.pth")
+        """Build the native agent set for the current board size.
+
+        Cross-board agents (when source≠current board) are constructed lazily
+        in ``_do_ai_move`` so the per-player overrides can change at any time
+        without re-initializing the native agent cache.
+        """
         hard_path = f"src/model_hard_{self.bs}x{self.bs}.pth"
+        # 6x6 has a legacy unpostfixed name
+        if self.bs == 6 and not Path(hard_path).exists() and Path("src/model_hard.pth").exists():
+            hard_path = "src/model_hard.pth"
         self.agents = {
             DIFF_EASY: RandomAgent(),
             DIFF_MED:  AIAgent(board_size=self.bs),
             DIFF_HARD: AIAgent(board_size=self.bs, model_path=hard_path, num_simulations=100)
-                       if __import__("pathlib").Path(hard_path).exists()
+                       if Path(hard_path).exists()
                        else AIAgent(board_size=self.bs, num_simulations=100),
         }
+
+    def _build_cross_agent(self, src_bs: int, difficulty_idx: int):
+        """Return a CrossBoardAgent for the given source board + difficulty."""
+        from experiments.cross_board import CrossBoardAgent
+        if DIFFS[difficulty_idx] == DIFF_HARD:
+            model_path = f"src/model_hard_{src_bs}x{src_bs}.pth"
+            if src_bs == 6 and not Path(model_path).exists() and Path("src/model_hard.pth").exists():
+                model_path = "src/model_hard.pth"
+        else:
+            model_path = f"src/model_{src_bs}x{src_bs}.pth"
+            if src_bs == 6 and not Path(model_path).exists() and Path("src/model.pth").exists():
+                model_path = "src/model.pth"
+        return CrossBoardAgent(
+            model_board_size=src_bs,
+            play_board_size=self.bs,
+            model_path=model_path,
+        )
 
     def _init_buttons(self) -> None:
         g = self.geo
         bh = 42
         by = g["footer_y"] + (g["footer_h"] - bh) // 2
-        self.btn_new    = _Btn(pygame.Rect( 15, by, 120, bh), "New Game",         COL_X,  COL_X,   self.F_H2)
-        self.btn_mode   = _Btn(pygame.Rect(140, by, 160, bh), self._mode_lbl(),   VIOLET, TEXT_PRI, self.F_H2)
-        self.btn_board  = _Btn(pygame.Rect(305, by, 110, bh), self._board_lbl(),  GOLD,   TEXT_PRI, self.F_H2)
-        self.btn_diff_x = _Btn(pygame.Rect(420, by, 120, bh), self._diff_x_lbl(), COL_X,  TEXT_PRI, self.F_H2)
-        self.btn_diff_o = _Btn(pygame.Rect(545, by, 120, bh), self._diff_o_lbl(), COL_O,  TEXT_PRI, self.F_H2)
-        self.btn_rules  = _Btn(pygame.Rect(670, by, 130, bh), "How to Play",      VIOLET, TEXT_PRI, self.F_H2)
-        self._btns      = [self.btn_new, self.btn_mode, self.btn_board, self.btn_diff_x, self.btn_diff_o, self.btn_rules]
+        # Compact layout to fit 7 buttons across 1000px width
+        self.btn_new    = _Btn(pygame.Rect( 12, by, 100, bh), "New Game",         COL_X,  COL_X,   self.F_H2)
+        self.btn_mode   = _Btn(pygame.Rect(118, by, 140, bh), self._mode_lbl(),   VIOLET, TEXT_PRI, self.F_H2)
+        self.btn_board  = _Btn(pygame.Rect(264, by,  98, bh), self._board_lbl(),  GOLD,   TEXT_PRI, self.F_H2)
+        self.btn_diff_x = _Btn(pygame.Rect(368, by, 130, bh), self._diff_x_lbl(), COL_X,  TEXT_PRI, self.F_H2)
+        self.btn_diff_o = _Btn(pygame.Rect(504, by, 130, bh), self._diff_o_lbl(), COL_O,  TEXT_PRI, self.F_H2)
+        self.btn_rules  = _Btn(pygame.Rect(640, by,  86, bh), "Rules",            VIOLET, TEXT_PRI, self.F_H2)
+        self.btn_adv    = _Btn(pygame.Rect(732, by, 156, bh), "AI Setup",         GOLD,   TEXT_PRI, self.F_H2)
+        self._btns      = [self.btn_new, self.btn_mode, self.btn_board,
+                           self.btn_diff_x, self.btn_diff_o, self.btn_rules, self.btn_adv]
 
     def _mode_lbl(self) -> str:
         short = {MODE_HVH: "H vs H", MODE_HVAI: "H vs AI", MODE_AIVAI: "AI vs AI"}
@@ -212,10 +248,12 @@ class PygameGUI:
         return f"Board: {self.bs}x{self.bs}"
 
     def _diff_x_lbl(self) -> str:
-        return f"X: {DIFFS[self.diff_x]}"
+        suffix = f" [{self.x_src_bs}×{self.x_src_bs}]" if self.x_src_bs and self.x_src_bs != self.bs else ""
+        return f"X: {DIFFS[self.diff_x]}{suffix}"
 
     def _diff_o_lbl(self) -> str:
-        return f"O: {DIFFS[self.diff_o]}"
+        suffix = f" [{self.o_src_bs}×{self.o_src_bs}]" if self.o_src_bs and self.o_src_bs != self.bs else ""
+        return f"O: {DIFFS[self.diff_o]}{suffix}"
 
     # ── Main loop ─────────────────────────────────────────────────────────────
 
@@ -230,8 +268,8 @@ class PygameGUI:
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     self._click(event.pos)
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                    if self.show_rules or self.show_result:
-                        self.show_rules = self.show_result = False
+                    if self.show_rules or self.show_result or self.show_advanced:
+                        self.show_rules = self.show_result = self.show_advanced = False
 
             if self.ai_waiting and now >= self.ai_at and not self.game.is_terminal():
                 self.ai_waiting = False
@@ -249,6 +287,9 @@ class PygameGUI:
     # ── Input ─────────────────────────────────────────────────────────────────
 
     def _click(self, pos: tuple) -> None:
+        if self.show_advanced:
+            self._click_advanced(pos)
+            return
         if self.show_rules:
             self.show_rules = False
             return
@@ -284,6 +325,10 @@ class PygameGUI:
             return
         if self.btn_rules.hit(pos):
             self.show_rules = True
+            return
+        if self.btn_adv.hit(pos):
+            self.show_advanced = True
+            self._build_advanced_buttons()
             return
 
         if not self.game.is_terminal() and not self._is_ai_turn():
@@ -335,8 +380,18 @@ class PygameGUI:
                 agent.mcts.advance_to_action(action)
 
     def _do_ai_move(self) -> None:
-        diff_idx = self.diff_x if self.game.current_player == PLAYER_X else self.diff_o
-        agent = self.agents[DIFFS[diff_idx]]
+        player = self.game.current_player
+        diff_idx = self.diff_x if player == PLAYER_X else self.diff_o
+        src_bs  = self.x_src_bs if player == PLAYER_X else self.o_src_bs
+
+        diff = DIFFS[diff_idx]
+        # Cross-board: build a transient adapter agent on the fly.
+        # Easy (Random) is board-agnostic, so we ignore the override.
+        if src_bs is not None and src_bs != self.bs and diff != DIFF_EASY:
+            agent = self._build_cross_agent(src_bs, diff_idx)
+        else:
+            agent = self.agents[diff]
+
         action = agent.select_action(self.game.clone())
         self._apply_move(action)
 
@@ -378,7 +433,9 @@ class PygameGUI:
         self._draw_board()
         self._draw_panel(PLAYER_O, g["r_panel_x"])
         self._draw_footer()
-        if self.show_rules:
+        if self.show_advanced:
+            self._draw_advanced_overlay()
+        elif self.show_rules:
             self._draw_rules_overlay()
         elif self.show_result and self.result:
             self._draw_result_overlay()
@@ -442,7 +499,7 @@ class PygameGUI:
                 self.screen,
                 tuple(c // 4 for c in color),
                 (px + 18, y),
-                (px + PANEL_W - 18, y),
+                (px + self.geo["panel_w"] - 18, y),
                 1,
             )
 
@@ -643,6 +700,135 @@ class PygameGUI:
         )
 
     # ── Rules overlay ─────────────────────────────────────────────────────────
+
+    # ── Advanced (AI Setup) overlay ──────────────────────────────────────────
+
+    def _build_advanced_buttons(self) -> None:
+        """Lay out clickable chips inside the AI Setup overlay."""
+        pw, ph = 620, 380
+        px = (WIN_W - pw) // 2
+        py = (WIN_H - ph) // 2
+        self._adv_overlay_rect = pygame.Rect(px, py, pw, ph)
+
+        # Row buttons per player: Native, 5×5, 6×6, 7×7 chips
+        self._adv_buttons = []
+        chip_w = 80
+        chip_h = 36
+        chip_gap = 12
+        labels = [("Native", None), ("5×5", 5), ("6×6", 6), ("7×7", 7)]
+
+        # X player chips
+        y_x = py + 110
+        x0 = px + 220
+        for i, (lbl, bs_val) in enumerate(labels):
+            rect = pygame.Rect(x0 + i * (chip_w + chip_gap), y_x, chip_w, chip_h)
+            color = COL_X
+            btn = _Btn(rect, lbl, color, TEXT_PRI, self.F_H2)
+            btn.bs_val = bs_val  # type: ignore[attr-defined]
+            btn.player = PLAYER_X  # type: ignore[attr-defined]
+            self._adv_buttons.append(btn)
+
+        # O player chips
+        y_o = py + 180
+        for i, (lbl, bs_val) in enumerate(labels):
+            rect = pygame.Rect(x0 + i * (chip_w + chip_gap), y_o, chip_w, chip_h)
+            btn = _Btn(rect, lbl, COL_O, TEXT_PRI, self.F_H2)
+            btn.bs_val = bs_val  # type: ignore[attr-defined]
+            btn.player = PLAYER_O  # type: ignore[attr-defined]
+            self._adv_buttons.append(btn)
+
+        # Apply / Reset / Close buttons
+        ab_y = py + ph - 56
+        self._adv_btn_reset = _Btn(
+            pygame.Rect(px + 60, ab_y, 130, 38), "Reset", TEXT_MUT, TEXT_PRI, self.F_H2,
+        )
+        self._adv_btn_apply = _Btn(
+            pygame.Rect(px + pw - 200, ab_y, 130, 38), "Apply", GOLD, TEXT_PRI, self.F_H2,
+        )
+
+    def _click_advanced(self, pos: tuple) -> None:
+        """Handle clicks while the AI Setup overlay is visible."""
+        # Click outside the overlay → close (cancel-style)
+        if not self._adv_overlay_rect.collidepoint(pos):
+            self.show_advanced = False
+            return
+
+        # Chip selection
+        for btn in self._adv_buttons:
+            if btn.hit(pos):
+                if btn.player == PLAYER_X:  # type: ignore[attr-defined]
+                    self.x_src_bs = btn.bs_val  # type: ignore[attr-defined]
+                else:
+                    self.o_src_bs = btn.bs_val  # type: ignore[attr-defined]
+                return
+
+        if self._adv_btn_reset.hit(pos):
+            self.x_src_bs = None
+            self.o_src_bs = None
+            return
+
+        if self._adv_btn_apply.hit(pos):
+            self.btn_diff_x.text = self._diff_x_lbl()
+            self.btn_diff_o.text = self._diff_o_lbl()
+            self.show_advanced = False
+            self._reset()
+            return
+
+    def _draw_advanced_overlay(self) -> None:
+        """Render the AI Setup modal: per-player model source chips."""
+        dim = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+        dim.fill((0, 0, 0, 170))
+        self.screen.blit(dim, (0, 0))
+
+        rect = self._adv_overlay_rect
+        _rrect(self.screen, PANEL_BG, rect, 16, 2, GOLD)
+        cx = WIN_W // 2
+
+        # Title
+        title = self.F_H1.render("AI Setup — Cross-Board Model Sources", True, TEXT_PRI)
+        self.screen.blit(title, title.get_rect(centerx=cx, y=rect.y + 22))
+
+        sub = self.F_SMALL.render(
+            f"Currently playing on {self.bs}×{self.bs} board. "
+            "Choose model source per player (Native = trained for current board).",
+            True, TEXT_MUT,
+        )
+        self.screen.blit(sub, sub.get_rect(centerx=cx, y=rect.y + 60))
+
+        # Row labels
+        for i, (label, src_bs, color) in enumerate([
+            ("Player X model:", self.x_src_bs, COL_X),
+            ("Player O model:", self.o_src_bs, COL_O),
+        ]):
+            y_row = rect.y + 110 + i * 70
+            lbl = self.F_H2.render(label, True, color)
+            self.screen.blit(lbl, (rect.x + 30, y_row + 8))
+
+        # Chip buttons with active highlight
+        for btn in self._adv_buttons:
+            cur = self.x_src_bs if btn.player == PLAYER_X else self.o_src_bs  # type: ignore[attr-defined]
+            is_active = (cur == btn.bs_val)  # type: ignore[attr-defined]
+            fill = btn.border if is_active else PANEL_BG
+            border = btn.border
+            _rrect(self.screen, fill, btn.rect, 8, 2, border)
+            txt_color = TEXT_PRI if is_active else btn.border
+            t = btn.font.render(btn.text, True, txt_color)
+            self.screen.blit(t, t.get_rect(center=btn.rect.center))
+
+        # Note about MCTS
+        note_lines = [
+            "Note: Cross-board agents use the resize adapter and run **without MCTS**",
+            "(pure neural-net policy). Native agents use full MCTS as configured.",
+        ]
+        for i, ln in enumerate(note_lines):
+            txt = self.F_SMALL.render(ln, True, TEXT_MUT)
+            self.screen.blit(txt, txt.get_rect(centerx=cx, y=rect.y + 250 + i * 22))
+
+        # Action buttons
+        for btn in (self._adv_btn_reset, self._adv_btn_apply):
+            _rrect(self.screen, PANEL_BG, btn.rect, 10, 2, btn.border)
+            t = btn.font.render(btn.text, True, btn.border)
+            self.screen.blit(t, t.get_rect(center=btn.rect.center))
 
     def _draw_rules_overlay(self) -> None:
         dim = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)

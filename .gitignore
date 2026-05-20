@@ -11,6 +11,13 @@ build/
 *.json
 !results/*.json
 !src/model.metadata.json
+!src/*.metadata.json
 
 # Temporary model checkpoints
 src/latest_model_test.pth
+
+# Colab training data artifacts (large NPZ files — host on Google Drive instead)
+colab/data_*.npz
+
+# Tournament dry-run outputs
+results/tournament_dryrun*.json
