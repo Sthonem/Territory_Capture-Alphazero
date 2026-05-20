@@ -211,6 +211,8 @@ def main() -> None:
     p.add_argument("--sims-hard", type=int, default=50)
     p.add_argument("--include-baselines", action="store_true",
                    help="Add Random/Heuristic/Minimax baseline matches.")
+    p.add_argument("--extended-cross", action="store_true",
+                   help="In cross mode, also test cross agents vs Random/Heuristic/Minimax/Medium.")
     p.add_argument("--output", default="results/tournament.json")
     a = p.parse_args()
 
@@ -228,6 +230,7 @@ def main() -> None:
         from experiments.cross_board import cross_board_tournament
         results.extend(cross_board_tournament(
             a.boards, a.games, a.sims_hard, repo_root,
+            extended=a.extended_cross,
         ))
 
     out_path = repo_root / a.output

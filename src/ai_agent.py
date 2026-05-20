@@ -14,16 +14,17 @@ from .model import PolicyValueNet
 
 
 def _load_arch_from_metadata(model_path: Path) -> dict:
-    """Read channels/num_blocks/dropout from sibling .metadata.json if present.
+    """Read architecture from sibling .metadata.json if present.
 
-    Returns dict with keys: channels, num_blocks, dropout_p (defaults if missing).
+    Returns dict with keys: channels, num_blocks, dropout_p, value_hidden
+    (defaults match the old pre-v2 architecture).
     """
     meta_path = model_path.with_suffix(".metadata.json")
-    arch = {"channels": 64, "num_blocks": 5, "dropout_p": 0.0}
+    arch = {"channels": 64, "num_blocks": 5, "dropout_p": 0.0, "value_hidden": 64}
     if meta_path.exists():
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            for key in ("channels", "num_blocks", "dropout_p"):
+            for key in ("channels", "num_blocks", "dropout_p", "value_hidden"):
                 if key in meta:
                     arch[key] = meta[key]
         except (json.JSONDecodeError, OSError):
@@ -57,12 +58,14 @@ class AIAgent:
             model_file = config.get("model_file", f"model_{board_size}x{board_size}.pth")
             resolved_model_path = Path(__file__).parent / model_file
 
-        # Auto-detect architecture (channels/blocks/dropout) from sibling metadata.
+        # Auto-detect architecture from sibling metadata. New Colab-trained
+        # models use value_hidden=32 (paper-aligned); legacy models use 64.
         arch = _load_arch_from_metadata(resolved_model_path)
         self.model = PolicyValueNet(
             board_size=board_size,
             channels=arch["channels"],
             num_blocks=arch["num_blocks"],
+            value_hidden=arch["value_hidden"],
         ).to(device)
         self.model_arch = arch
         self.model_source = "random-init"
