@@ -76,6 +76,13 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_PROGRESS_EVERY,
         help="Print a progress update every N completed games.",
     )
+    parser.add_argument(
+        "--board-size",
+        type=int,
+        default=6,
+        choices=[5, 6, 7],
+        help="Board size (5, 6, or 7).",
+    )
     return parser.parse_args()
 
 
@@ -87,6 +94,7 @@ def generate_dataset(
     seed: Optional[int] = None,
     workers: int = 1,
     progress_every: int = DEFAULT_PROGRESS_EVERY,
+    board_size: int = 6,
 ) -> DatasetGenerationSummary:
     """Run many self-play games and stream the samples directly to JSON."""
 
@@ -109,6 +117,7 @@ def generate_dataset(
         x_agent_name=x_agent_name,
         o_agent_name=o_agent_name,
         seed=seed,
+        board_size=board_size,
     )
 
     total_samples, skipped_samples = stream_tasks_to_json(
@@ -154,18 +163,19 @@ def build_generation_tasks(
     x_agent_name: str,
     o_agent_name: str,
     seed: Optional[int],
+    board_size: int = 6,
     games_per_task: int = DEFAULT_GAMES_PER_TASK,
-) -> List[tuple[int, str, str, Optional[int]]]:
+) -> List[tuple[int, str, str, Optional[int], int]]:
     """Split a dataset run into small stable tasks."""
 
-    tasks: List[tuple[int, str, str, Optional[int]]] = []
+    tasks: List[tuple[int, str, str, Optional[int], int]] = []
     remaining_games = num_games
     task_index = 0
 
     while remaining_games > 0:
         task_games = min(games_per_task, remaining_games)
         task_seed = None if seed is None else seed + task_index * 1000
-        tasks.append((task_games, x_agent_name, o_agent_name, task_seed))
+        tasks.append((task_games, x_agent_name, o_agent_name, task_seed, board_size))
         remaining_games -= task_games
         task_index += 1
 
@@ -251,15 +261,20 @@ def _consume_task_results(
 
 
 def _generate_task_samples(
-    task: tuple[int, str, str, Optional[int]],
+    task: tuple[int, str, str, Optional[int], int],
 ) -> tuple[int, int, list[dict]]:
     """Generate one task worth of samples and return JSON-ready dictionaries."""
 
-    num_games, x_agent_name, o_agent_name, seed = task
+    num_games, x_agent_name, o_agent_name, seed, board_size = task
     x_agent = create_agent(x_agent_name, seed=seed)
     o_seed: Optional[int] = None if seed is None else seed + 1
     o_agent = create_agent(o_agent_name, seed=o_seed)
     encoder = get_encoder_by_name("relative")
+
+    from .encoding import BOARD_CONFIGS
+
+    config = BOARD_CONFIGS.get(board_size, {})
+    stones = config.get("stones_per_player", 10)
 
     payload: list[dict] = []
     skipped_samples = 0
@@ -267,12 +282,12 @@ def _generate_task_samples(
         episode = play_self_play_episode(
             x_agent=x_agent,
             o_agent=o_agent,
+            board_size=board_size,
+            stones_per_player=stones,
             encoder=encoder,
         )
         for sample in episode.samples:
-            try:
-                assert has_expected_state_shape(sample.encoded_state, channels=2, board_size=6)
-            except AssertionError:
+            if not has_expected_state_shape(sample.encoded_state, channels=2, board_size=board_size):
                 skipped_samples += 1
                 print("Warning: skipped invalid sample with unexpected encoded_state shape.")
                 continue
@@ -293,6 +308,7 @@ def main() -> None:
         seed=args.seed,
         workers=args.workers,
         progress_every=args.progress_every,
+        board_size=args.board_size,
     )
 
     print("Territory Capture Dataset Generation")

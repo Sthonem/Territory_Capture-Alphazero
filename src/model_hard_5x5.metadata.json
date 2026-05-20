@@ -1,0 +1,136 @@
+{
+  "created_at_utc": "2026-05-07T00:37:25.588252+00:00",
+  "checkpoint_path": "/Users/erdem/Downloads/Ai Project/territory-capture/src/model_hard_5x5.pth",
+  "records_used": 2000000,
+  "epochs": 20,
+  "batch_size": 512,
+  "initial_learning_rate": 0.001,
+  "validation_split": 0.1,
+  "scheduler": {
+    "name": "StepLR",
+    "step_size": 3,
+    "gamma": 0.5
+  },
+  "history": [
+    {
+      "epoch": 1,
+      "train_loss": 0.8367828404164287,
+      "validation_loss": 0.7927363592645397,
+      "learning_rate": 0.001
+    },
+    {
+      "epoch": 2,
+      "train_loss": 0.7872026206690297,
+      "validation_loss": 0.7759389578533904,
+      "learning_rate": 0.001
+    },
+    {
+      "epoch": 3,
+      "train_loss": 0.7767629465586225,
+      "validation_loss": 0.770417973665935,
+      "learning_rate": 0.001
+    },
+    {
+      "epoch": 4,
+      "train_loss": 0.765991597774357,
+      "validation_loss": 0.7659889211130264,
+      "learning_rate": 0.0005
+    },
+    {
+      "epoch": 5,
+      "train_loss": 0.7629862349560914,
+      "validation_loss": 0.7696876646307729,
+      "learning_rate": 0.0005
+    },
+    {
+      "epoch": 6,
+      "train_loss": 0.7602443505201459,
+      "validation_loss": 0.7668940245038103,
+      "learning_rate": 0.0005
+    },
+    {
+      "epoch": 7,
+      "train_loss": 0.752971718030578,
+      "validation_loss": 0.7661768478505752,
+      "learning_rate": 0.00025
+    },
+    {
+      "epoch": 8,
+      "train_loss": 0.7495543623980944,
+      "validation_loss": 0.7686942227356269,
+      "learning_rate": 0.00025
+    },
+    {
+      "epoch": 9,
+      "train_loss": 0.7464525382775089,
+      "validation_loss": 0.7711561145380025,
+      "learning_rate": 0.00025
+    },
+    {
+      "epoch": 10,
+      "train_loss": 0.7390910693538609,
+      "validation_loss": 0.7746532647810933,
+      "learning_rate": 0.000125
+    },
+    {
+      "epoch": 11,
+      "train_loss": 0.7356367741835402,
+      "validation_loss": 0.7784614703234505,
+      "learning_rate": 0.000125
+    },
+    {
+      "epoch": 12,
+      "train_loss": 0.7327136814899412,
+      "validation_loss": 0.7805925028403397,
+      "learning_rate": 0.000125
+    },
+    {
+      "epoch": 13,
+      "train_loss": 0.7269100252543158,
+      "validation_loss": 0.7856584813283838,
+      "learning_rate": 6.25e-05
+    },
+    {
+      "epoch": 14,
+      "train_loss": 0.7246293309436045,
+      "validation_loss": 0.7885501418272247,
+      "learning_rate": 6.25e-05
+    },
+    {
+      "epoch": 15,
+      "train_loss": 0.7227459623138246,
+      "validation_loss": 0.7901488393164047,
+      "learning_rate": 6.25e-05
+    },
+    {
+      "epoch": 16,
+      "train_loss": 0.7189793436702201,
+      "validation_loss": 0.792682880788203,
+      "learning_rate": 3.125e-05
+    },
+    {
+      "epoch": 17,
+      "train_loss": 0.717728917356644,
+      "validation_loss": 0.7942497760743437,
+      "learning_rate": 3.125e-05
+    },
+    {
+      "epoch": 18,
+      "train_loss": 0.7166609637040869,
+      "validation_loss": 0.7954620879019618,
+      "learning_rate": 3.125e-05
+    },
+    {
+      "epoch": 19,
+      "train_loss": 0.7144596526172516,
+      "validation_loss": 0.796822941973996,
+      "learning_rate": 1.5625e-05
+    },
+    {
+      "epoch": 20,
+      "train_loss": 0.7137909870132787,
+      "validation_loss": 0.7982473192007645,
+      "learning_rate": 1.5625e-05
+    }
+  ]
+}

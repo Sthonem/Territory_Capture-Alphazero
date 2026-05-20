@@ -149,13 +149,18 @@ def evaluate_tiebreaker(
     toward the tie-break. Occupied center cells and neutral cells do not count.
     """
 
-    center_indices = (board_size // 2 - 1, board_size // 2)
+    if board_size % 2 == 1:
+        c = board_size // 2
+        center_cells = [(c, c)]
+    else:
+        lo, hi = board_size // 2 - 1, board_size // 2
+        center_cells = [(lo, lo), (lo, hi), (hi, lo), (hi, hi)]
+
     scores = {PLAYER_X: 0, PLAYER_O: 0}
-    for row in center_indices:
-        for col in center_indices:
-            owner = territory_map.get((row, col), empty_symbol)
-            if owner in scores:
-                scores[owner] += 1
+    for cell in center_cells:
+        owner = territory_map.get(cell, empty_symbol)
+        if owner in scores:
+            scores[owner] += 1
     return scores
 
 

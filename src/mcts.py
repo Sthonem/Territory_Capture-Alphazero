@@ -10,7 +10,7 @@ from typing import Dict, Optional
 import torch
 import torch.nn.functional as F
 
-from .encoding import ACTION_SPACE_SIZE, action_to_index, encode_state
+from .encoding import action_to_index, encode_state
 from .game import TerritoryCaptureGame
 
 
@@ -121,15 +121,18 @@ class MCTS:
         """Return the root visit-count distribution over all actions."""
 
         if self.root is None:
-            return [0.0] * ACTION_SPACE_SIZE
+            bs = getattr(self.model, "board_size", 6)
+            return [0.0] * (bs * bs)
 
+        bs = self.root.game.board_size
+        action_space = bs * bs
         total_visits = sum(child.visit_count for child in self.root.children.values())
-        policy = [0.0] * ACTION_SPACE_SIZE
+        policy = [0.0] * action_space
         if total_visits == 0:
             return policy
 
         for action, child in self.root.children.items():
-            policy[action_to_index(action)] = child.visit_count / total_visits
+            policy[action_to_index(action, bs)] = child.visit_count / total_visits
         return policy
 
     def _expand(self, node: Node) -> float:
@@ -147,7 +150,7 @@ class MCTS:
 
         move_priors = []
         for move in legal_moves:
-            move_priors.append(policy_probs[action_to_index(move)].item())
+            move_priors.append(policy_probs[action_to_index(move, node.game.board_size)].item())
 
         total_prior = sum(move_priors)
         if total_prior <= 0:

@@ -21,7 +21,7 @@ from typing import Any, Callable, Dict, List, Sequence
 
 from .agents import Agent
 from .encoding import (
-    ACTION_SPACE_SIZE,
+    BOARD_SIZE,
     ActionMask,
     EncodedState,
     action_to_index,
@@ -66,13 +66,13 @@ class SelfPlayEpisode:
 EncoderFn = Callable[[TerritoryCaptureGame], EncodedState]
 
 
-def create_one_hot_policy_target(action_index: int) -> List[int]:
+def create_one_hot_policy_target(action_index: int, action_space: int = BOARD_SIZE * BOARD_SIZE) -> List[int]:
     """Convert one selected action into a fixed-size one-hot policy target."""
 
-    if not (0 <= action_index < ACTION_SPACE_SIZE):
+    if not (0 <= action_index < action_space):
         raise ValueError(f"Action index out of bounds: {action_index}")
 
-    policy_target = [0] * ACTION_SPACE_SIZE
+    policy_target = [0] * action_space
     policy_target[action_index] = 1
     return policy_target
 
@@ -102,7 +102,7 @@ def play_self_play_episode(
         last_record = recorded_positions[-1]
         recorded_positions[-1] = RecordedPosition(
             encoded_state=last_record.encoded_state,
-            selected_action_index=action_to_index(action),
+            selected_action_index=action_to_index(action, game.board_size),
             legal_action_mask=last_record.legal_action_mask,
             player_to_move=last_record.player_to_move,
         )
@@ -110,6 +110,7 @@ def play_self_play_episode(
     samples = build_training_samples(
         recorded_positions=recorded_positions,
         winner=game.get_winner(),
+        board_size=board_size,
     )
     return SelfPlayEpisode(
         samples=samples,
@@ -162,9 +163,11 @@ def has_expected_state_shape(
 def build_training_samples(
     recorded_positions: Sequence[RecordedPosition],
     winner: str | None,
+    board_size: int = BOARD_SIZE,
 ) -> List[TrainingSample]:
     """Convert recorded move snapshots into full training samples."""
 
+    action_space = board_size * board_size
     samples: List[TrainingSample] = []
     for position in recorded_positions:
         if position.selected_action_index < 0:
@@ -174,7 +177,7 @@ def build_training_samples(
             winner=winner,
             player=position.player_to_move,
         )
-        policy_target = create_one_hot_policy_target(position.selected_action_index)
+        policy_target = create_one_hot_policy_target(position.selected_action_index, action_space)
         samples.append(
             TrainingSample(
                 encoded_state=position.encoded_state,

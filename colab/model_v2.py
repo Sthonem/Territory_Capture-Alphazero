@@ -1,5 +1,8 @@
-"""Policy-value neural network used by the MCTS agent."""
+"""Improved policy-value network (v2) with configurable depth/width + dropout.
 
+Backward-compatible with src.model.PolicyValueNet weights when channels=64, num_blocks=5,
+and dropout_p=0.0 (state_dict keys match).
+"""
 from __future__ import annotations
 
 import torch
@@ -8,11 +11,6 @@ import torch.nn.functional as F
 
 
 class ResBlock(nn.Module):
-    """Standard residual block for small board-state feature extraction.
-
-    Supports optional dropout (set ``dropout_p > 0``).
-    """
-
     def __init__(self, channels: int, dropout_p: float = 0.0) -> None:
         super().__init__()
         self.conv1 = nn.Conv2d(channels, channels, 3, padding=1, bias=False)
@@ -22,8 +20,6 @@ class ResBlock(nn.Module):
         self.drop = nn.Dropout2d(p=dropout_p) if dropout_p > 0 else nn.Identity()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Apply one residual block."""
-
         residual = x
         x = F.relu(self.bn1(self.conv1(x)))
         x = self.bn2(self.conv2(x))
@@ -32,12 +28,8 @@ class ResBlock(nn.Module):
         return F.relu(x)
 
 
-class PolicyValueNet(nn.Module):
-    """Joint policy and value network for Territory Capture states.
-
-    Backward-compatible with previous checkpoints (channels=64, num_blocks=5,
-    dropout_p=0.0). Supports v2 architectures via constructor args.
-    """
+class PolicyValueNetV2(nn.Module):
+    """Configurable AlphaZero-style policy-value network."""
 
     def __init__(
         self,
@@ -46,7 +38,7 @@ class PolicyValueNet(nn.Module):
         channels: int = 64,
         num_blocks: int = 5,
         dropout_p: float = 0.0,
-        value_hidden: int = 64,
+        value_hidden: int = 32,  # paper uses 32 (was 64 in old code)
     ) -> None:
         super().__init__()
         self.board_size = board_size
@@ -70,8 +62,6 @@ class PolicyValueNet(nn.Module):
         self.value_drop = nn.Dropout(p=dropout_p) if dropout_p > 0 else nn.Identity()
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Return policy logits and a scalar value estimate."""
-
         x = F.relu(self.bn_in(self.conv_in(x)))
         for block in self.res_blocks:
             x = block(x)

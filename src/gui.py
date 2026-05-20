@@ -3,32 +3,44 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 import pygame
 
 from .agents import HeuristicAgent, MinimaxAgent, RandomAgent
 from .ai_agent import AIAgent
+from .encoding import BOARD_CONFIGS
 from .game import GameResult, TerritoryCaptureGame
 from .rules import EMPTY, PLAYER_O, PLAYER_X
 
 # ── Geometry ──────────────────────────────────────────────────────────────────
 WIN_W, WIN_H = 1000, 720
-CELL         = 80
-BS           = 6
-BOARD_PX     = CELL * BS                   # 480
-BOARD_X      = (WIN_W - BOARD_PX) // 2    # 260
 BOARD_Y      = 100
-BOARD_PY     = BOARD_PX                   # 480
 
-PANEL_W    = BOARD_X - 20                 # 240
-L_PANEL_X  = 10
-R_PANEL_X  = BOARD_X + BOARD_PX + 10     # 750
-PANEL_Y    = BOARD_Y
-PANEL_H    = BOARD_PY                     # 480
+BOARD_SIZES  = [5, 6, 7]
+DEFAULT_BS   = 6
 
-FOOTER_Y   = BOARD_Y + BOARD_PY + 16     # 596
-FOOTER_H   = WIN_H - FOOTER_Y            # 124
+
+def _calc_geometry(bs: int) -> dict:
+    """Compute dynamic layout values for a given board size."""
+    cell = max(60, min(80, 480 // bs))
+    board_px = cell * bs
+    board_x = (WIN_W - board_px) // 2
+    panel_w = board_x - 20
+    return {
+        "cell": cell,
+        "bs": bs,
+        "board_px": board_px,
+        "board_x": board_x,
+        "panel_w": panel_w,
+        "l_panel_x": 10,
+        "r_panel_x": board_x + board_px + 10,
+        "panel_y": BOARD_Y,
+        "panel_h": board_px,
+        "footer_y": BOARD_Y + board_px + 16,
+        "footer_h": WIN_H - (BOARD_Y + board_px + 16),
+    }
 
 # ── Palette ───────────────────────────────────────────────────────────────────
 BG         = (5,   8,  22)
@@ -131,7 +143,13 @@ class PygameGUI:
         pygame.display.set_caption("Territory Capture")
         self.clock  = pygame.time.Clock()
 
-        self.game      = TerritoryCaptureGame()
+        self.bs_index = BOARD_SIZES.index(DEFAULT_BS)
+        self.bs       = DEFAULT_BS
+        self.geo      = _calc_geometry(self.bs)
+
+        config = BOARD_CONFIGS.get(self.bs, {})
+        stones = config.get("stones_per_player", 10)
+        self.game      = TerritoryCaptureGame(board_size=self.bs, stones_per_player=stones)
         self.result:   Optional[GameResult] = None
         self.last_move: Optional[Position]  = None
         self.flashes:  List[_Flash]         = []
@@ -143,8 +161,16 @@ class PygameGUI:
         self.diff_o  = 2   # O difficulty index (H vs AI / AI vs AI)
         self.show_rules  = False
         self.show_result = False
+        self.show_advanced = False
         self.ai_waiting  = False
         self.ai_at       = 0
+
+        # Cross-board model overrides per player (None = native to current board).
+        # When set to 5/6/7, the AI for that player uses a model trained on a
+        # different board size, wrapped in CrossBoardAgent.
+        self.x_src_bs: Optional[int] = None
+        self.o_src_bs: Optional[int] = None
+        self._adv_buttons: List["_Btn"] = []  # populated when overlay opens
 
         self._init_fonts()
         self._init_agents()
@@ -164,31 +190,70 @@ class PygameGUI:
         self.F_SCORE = f(28, True)
 
     def _init_agents(self) -> None:
+        """Build the native agent set for the current board size.
+
+        Cross-board agents (when source≠current board) are constructed lazily
+        in ``_do_ai_move`` so the per-player overrides can change at any time
+        without re-initializing the native agent cache.
+        """
+        hard_path = f"src/model_hard_{self.bs}x{self.bs}.pth"
+        # 6x6 has a legacy unpostfixed name
+        if self.bs == 6 and not Path(hard_path).exists() and Path("src/model_hard.pth").exists():
+            hard_path = "src/model_hard.pth"
         self.agents = {
             DIFF_EASY: RandomAgent(),
-            DIFF_MED:  AIAgent(),
-            DIFF_HARD: AIAgent(model_path="src/model_hard.pth", num_simulations=100),
+            DIFF_MED:  AIAgent(board_size=self.bs),
+            DIFF_HARD: AIAgent(board_size=self.bs, model_path=hard_path, num_simulations=100)
+                       if Path(hard_path).exists()
+                       else AIAgent(board_size=self.bs, num_simulations=100),
         }
 
+    def _build_cross_agent(self, src_bs: int, difficulty_idx: int):
+        """Return a CrossBoardAgent for the given source board + difficulty."""
+        from experiments.cross_board import CrossBoardAgent
+        if DIFFS[difficulty_idx] == DIFF_HARD:
+            model_path = f"src/model_hard_{src_bs}x{src_bs}.pth"
+            if src_bs == 6 and not Path(model_path).exists() and Path("src/model_hard.pth").exists():
+                model_path = "src/model_hard.pth"
+        else:
+            model_path = f"src/model_{src_bs}x{src_bs}.pth"
+            if src_bs == 6 and not Path(model_path).exists() and Path("src/model.pth").exists():
+                model_path = "src/model.pth"
+        return CrossBoardAgent(
+            model_board_size=src_bs,
+            play_board_size=self.bs,
+            model_path=model_path,
+        )
+
     def _init_buttons(self) -> None:
+        g = self.geo
         bh = 42
-        by = FOOTER_Y + (FOOTER_H - bh) // 2
-        self.btn_new   = _Btn(pygame.Rect( 30, by, 148, bh), "New Game",    COL_X,   COL_X,    self.F_H2)
-        self.btn_mode  = _Btn(pygame.Rect(188, by, 210, bh), self._mode_lbl(), VIOLET, TEXT_PRI, self.F_H2)
-        self.btn_diff_x = _Btn(pygame.Rect(408, by, 148, bh), self._diff_x_lbl(), COL_X, TEXT_PRI, self.F_H2)
-        self.btn_diff_o = _Btn(pygame.Rect(566, by, 148, bh), self._diff_o_lbl(), COL_O, TEXT_PRI, self.F_H2)
-        self.btn_rules  = _Btn(pygame.Rect(724, by, 148, bh), "How to Play", VIOLET, TEXT_PRI, self.F_H2)
-        self._btns      = [self.btn_new, self.btn_mode, self.btn_diff_x, self.btn_diff_o, self.btn_rules]
+        by = g["footer_y"] + (g["footer_h"] - bh) // 2
+        # Compact layout to fit 7 buttons across 1000px width
+        self.btn_new    = _Btn(pygame.Rect( 12, by, 100, bh), "New Game",         COL_X,  COL_X,   self.F_H2)
+        self.btn_mode   = _Btn(pygame.Rect(118, by, 140, bh), self._mode_lbl(),   VIOLET, TEXT_PRI, self.F_H2)
+        self.btn_board  = _Btn(pygame.Rect(264, by,  98, bh), self._board_lbl(),  GOLD,   TEXT_PRI, self.F_H2)
+        self.btn_diff_x = _Btn(pygame.Rect(368, by, 130, bh), self._diff_x_lbl(), COL_X,  TEXT_PRI, self.F_H2)
+        self.btn_diff_o = _Btn(pygame.Rect(504, by, 130, bh), self._diff_o_lbl(), COL_O,  TEXT_PRI, self.F_H2)
+        self.btn_rules  = _Btn(pygame.Rect(640, by,  86, bh), "Rules",            VIOLET, TEXT_PRI, self.F_H2)
+        self.btn_adv    = _Btn(pygame.Rect(732, by, 156, bh), "AI Setup",         GOLD,   TEXT_PRI, self.F_H2)
+        self._btns      = [self.btn_new, self.btn_mode, self.btn_board,
+                           self.btn_diff_x, self.btn_diff_o, self.btn_rules, self.btn_adv]
 
     def _mode_lbl(self) -> str:
         short = {MODE_HVH: "H vs H", MODE_HVAI: "H vs AI", MODE_AIVAI: "AI vs AI"}
         return f"Mode: {short[MODES[self.mode_i]]}"
 
+    def _board_lbl(self) -> str:
+        return f"Board: {self.bs}x{self.bs}"
+
     def _diff_x_lbl(self) -> str:
-        return f"X: {DIFFS[self.diff_x]}"
+        suffix = f" [{self.x_src_bs}×{self.x_src_bs}]" if self.x_src_bs and self.x_src_bs != self.bs else ""
+        return f"X: {DIFFS[self.diff_x]}{suffix}"
 
     def _diff_o_lbl(self) -> str:
-        return f"O: {DIFFS[self.diff_o]}"
+        suffix = f" [{self.o_src_bs}×{self.o_src_bs}]" if self.o_src_bs and self.o_src_bs != self.bs else ""
+        return f"O: {DIFFS[self.diff_o]}{suffix}"
 
     # ── Main loop ─────────────────────────────────────────────────────────────
 
@@ -203,8 +268,8 @@ class PygameGUI:
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     self._click(event.pos)
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                    if self.show_rules or self.show_result:
-                        self.show_rules = self.show_result = False
+                    if self.show_rules or self.show_result or self.show_advanced:
+                        self.show_rules = self.show_result = self.show_advanced = False
 
             if self.ai_waiting and now >= self.ai_at and not self.game.is_terminal():
                 self.ai_waiting = False
@@ -222,6 +287,9 @@ class PygameGUI:
     # ── Input ─────────────────────────────────────────────────────────────────
 
     def _click(self, pos: tuple) -> None:
+        if self.show_advanced:
+            self._click_advanced(pos)
+            return
         if self.show_rules:
             self.show_rules = False
             return
@@ -237,6 +305,14 @@ class PygameGUI:
             self.btn_mode.text = self._mode_lbl()
             self._reset()
             return
+        if self.btn_board.hit(pos):
+            self.bs_index = (self.bs_index + 1) % len(BOARD_SIZES)
+            self.bs = BOARD_SIZES[self.bs_index]
+            self.geo = _calc_geometry(self.bs)
+            self._init_agents()
+            self._init_buttons()
+            self._reset()
+            return
         if self.btn_diff_x.hit(pos):
             self.diff_x = (self.diff_x + 1) % len(DIFFS)
             self.btn_diff_x.text = self._diff_x_lbl()
@@ -250,6 +326,10 @@ class PygameGUI:
         if self.btn_rules.hit(pos):
             self.show_rules = True
             return
+        if self.btn_adv.hit(pos):
+            self.show_advanced = True
+            self._build_advanced_buttons()
+            return
 
         if not self.game.is_terminal() and not self._is_ai_turn():
             cell = self._px_to_cell(pos)
@@ -258,11 +338,13 @@ class PygameGUI:
                 self._apply_move(cell)
 
     def _px_to_cell(self, pos: tuple) -> Optional[Position]:
+        g = self.geo
         x, y = pos
-        if BOARD_X <= x < BOARD_X + BOARD_PX and BOARD_Y <= y < BOARD_Y + BOARD_PY:
-            col = (x - BOARD_X) // CELL
-            row = (y - BOARD_Y) // CELL
-            if 0 <= row < BS and 0 <= col < BS:
+        bx, bpx, cell, bs = g["board_x"], g["board_px"], g["cell"], g["bs"]
+        if bx <= x < bx + bpx and BOARD_Y <= y < BOARD_Y + bpx:
+            col = (x - bx) // cell
+            row = (y - BOARD_Y) // cell
+            if 0 <= row < bs and 0 <= col < bs:
                 return (row, col)
         return None
 
@@ -298,13 +380,25 @@ class PygameGUI:
                 agent.mcts.advance_to_action(action)
 
     def _do_ai_move(self) -> None:
-        diff_idx = self.diff_x if self.game.current_player == PLAYER_X else self.diff_o
-        agent = self.agents[DIFFS[diff_idx]]
+        player = self.game.current_player
+        diff_idx = self.diff_x if player == PLAYER_X else self.diff_o
+        src_bs  = self.x_src_bs if player == PLAYER_X else self.o_src_bs
+
+        diff = DIFFS[diff_idx]
+        # Cross-board: build a transient adapter agent on the fly.
+        # Easy (Random) is board-agnostic, so we ignore the override.
+        if src_bs is not None and src_bs != self.bs and diff != DIFF_EASY:
+            agent = self._build_cross_agent(src_bs, diff_idx)
+        else:
+            agent = self.agents[diff]
+
         action = agent.select_action(self.game.clone())
         self._apply_move(action)
 
     def _reset(self) -> None:
-        self.game.reset()
+        config = BOARD_CONFIGS.get(self.bs, {})
+        stones = config.get("stones_per_player", 10)
+        self.game = TerritoryCaptureGame(board_size=self.bs, stones_per_player=stones)
         self.result      = None
         self.last_move   = None
         self.flashes.clear()
@@ -332,13 +426,16 @@ class PygameGUI:
     # ── Drawing ───────────────────────────────────────────────────────────────
 
     def _draw(self) -> None:
+        g = self.geo
         self.screen.fill(BG)
         self._draw_header()
-        self._draw_panel(PLAYER_X, L_PANEL_X)
+        self._draw_panel(PLAYER_X, g["l_panel_x"])
         self._draw_board()
-        self._draw_panel(PLAYER_O, R_PANEL_X)
+        self._draw_panel(PLAYER_O, g["r_panel_x"])
         self._draw_footer()
-        if self.show_rules:
+        if self.show_advanced:
+            self._draw_advanced_overlay()
+        elif self.show_rules:
             self._draw_rules_overlay()
         elif self.show_result and self.result:
             self._draw_result_overlay()
@@ -357,8 +454,10 @@ class PygameGUI:
     # ── Player panel ─────────────────────────────────────────────────────────
 
     def _draw_panel(self, player: str, px: int) -> None:
+        g = self.geo
+        pw, ph, py_top = g["panel_w"], g["panel_h"], g["panel_y"]
         color  = COL_X if player == PLAYER_X else COL_O
-        rect   = pygame.Rect(px, PANEL_Y, PANEL_W, PANEL_H)
+        rect   = pygame.Rect(px, py_top, pw, ph)
         border = tuple(c // 2 for c in color)
         _rrect(self.screen, PANEL_BG, rect, 12, 1, border)
 
@@ -366,13 +465,13 @@ class PygameGUI:
         is_current = (not self.game.is_terminal()
                       and self.game.current_player == player)
         if is_current:
-            gsurf = pygame.Surface((PANEL_W, PANEL_H), pygame.SRCALPHA)
-            pygame.draw.rect(gsurf, (*color, 14), (0, 0, PANEL_W, PANEL_H),
+            gsurf = pygame.Surface((pw, ph), pygame.SRCALPHA)
+            pygame.draw.rect(gsurf, (*color, 14), (0, 0, pw, ph),
                              border_radius=12)
             self.screen.blit(gsurf, rect.topleft)
 
-        cx = px + PANEL_W // 2
-        y  = PANEL_Y + 22
+        cx = px + pw // 2
+        y  = py_top + 22
 
         # Player name
         lbl = self.F_H1.render(f"Player  {player}", True, color)
@@ -400,7 +499,7 @@ class PygameGUI:
                 self.screen,
                 tuple(c // 4 for c in color),
                 (px + 18, y),
-                (px + PANEL_W - 18, y),
+                (px + self.geo["panel_w"] - 18, y),
                 1,
             )
 
@@ -414,15 +513,16 @@ class PygameGUI:
         )
         y += 20
         stones = self.game.stones_placed[player]
-        sv = self.F_SCORE.render(f"{stones} / 10", True, color)
+        max_stones = self.game.stones_per_player
+        sv = self.F_SCORE.render(f"{stones} / {max_stones}", True, color)
         self.screen.blit(sv, sv.get_rect(centerx=cx, y=y))
         y += 36
 
         # Progress bar
-        bw = PANEL_W - 30
+        bw = pw - 30
         bar = pygame.Rect(px + 15, y, bw, 7)
         pygame.draw.rect(self.screen, GRID_C, bar, border_radius=3)
-        fw = int(bw * stones / 10)
+        fw = int(bw * stones / max_stones) if max_stones > 0 else 0
         if fw > 0:
             pygame.draw.rect(self.screen, color,
                              pygame.Rect(px + 15, y, fw, 7), border_radius=3)
@@ -475,19 +575,21 @@ class PygameGUI:
     # ── Board ─────────────────────────────────────────────────────────────────
 
     def _draw_board(self) -> None:
+        g = self.geo
+        bx, bpx, cell, bs = g["board_x"], g["board_px"], g["cell"], g["bs"]
         board_rect = pygame.Rect(
-            BOARD_X - 14, BOARD_Y - 14,
-            BOARD_PX + 28, BOARD_PY + 28,
+            bx - 14, BOARD_Y - 14,
+            bpx + 28, bpx + 28,
         )
         _rrect(self.screen, PANEL_BG, board_rect, 14, 1, GRID_C)
 
         mouse = pygame.mouse.get_pos()
 
-        for row in range(BS):
-            for col in range(BS):
-                cx = BOARD_X + col * CELL + CELL // 2
-                cy = BOARD_Y + row * CELL + CELL // 2
-                crect = pygame.Rect(BOARD_X + col * CELL, BOARD_Y + row * CELL, CELL, CELL)
+        for row in range(bs):
+            for col in range(bs):
+                cx = bx + col * cell + cell // 2
+                cy = BOARD_Y + row * cell + cell // 2
+                crect = pygame.Rect(bx + col * cell, BOARD_Y + row * cell, cell, cell)
                 val   = self.game.board[row][col]
                 is_last = self.last_move == (row, col)
 
@@ -505,7 +607,7 @@ class PygameGUI:
                         TER_N  if t_owner == EMPTY   else None
                     )
                     if tcol:
-                        ov = pygame.Surface((CELL, CELL), pygame.SRCALPHA)
+                        ov = pygame.Surface((cell, cell), pygame.SRCALPHA)
                         ov.fill((*tcol, self.ter_alpha // 3))
                         self.screen.blit(ov, crect.topleft)
 
@@ -513,7 +615,7 @@ class PygameGUI:
                 for fl in self.flashes:
                     if fl.pos == (row, col):
                         a = fl.alpha()
-                        fs = pygame.Surface((CELL, CELL), pygame.SRCALPHA)
+                        fs = pygame.Surface((cell, cell), pygame.SRCALPHA)
                         fs.fill((*CAP_COL, a))
                         self.screen.blit(fs, crect.topleft)
 
@@ -538,14 +640,15 @@ class PygameGUI:
                             and not self.game.is_terminal()
                             and not self._is_ai_turn()
                             and self.game.is_legal_move((row, col))):
-                        hov = pygame.Surface((CELL, CELL), pygame.SRCALPHA)
+                        hov = pygame.Surface((cell, cell), pygame.SRCALPHA)
                         hov.fill((255, 255, 255, 16))
                         self.screen.blit(hov, crect.topleft)
                         hint_col = COL_X if self.game.current_player == PLAYER_X else COL_O
                         pygame.draw.circle(self.screen, (*hint_col, 70), (cx, cy), 10)
 
     def _draw_stone(self, cx: int, cy: int, color: tuple, highlighted: bool) -> None:
-        radius = CELL // 2 - 8   # 32
+        cell = self.geo["cell"]
+        radius = cell // 2 - 8
 
         # Glow layers
         glow_a = 95 if highlighted else 55
@@ -574,26 +677,158 @@ class PygameGUI:
     # ── Footer ────────────────────────────────────────────────────────────────
 
     def _draw_footer(self) -> None:
+        g = self.geo
+        fy, fh = g["footer_y"], g["footer_h"]
         pygame.draw.rect(self.screen, (7, 12, 28),
-                         pygame.Rect(0, FOOTER_Y, WIN_W, FOOTER_H))
-        pygame.draw.line(self.screen, GRID_C, (0, FOOTER_Y), (WIN_W, FOOTER_Y), 1)
+                         pygame.Rect(0, fy, WIN_W, fh))
+        pygame.draw.line(self.screen, GRID_C, (0, fy), (WIN_W, fy), 1)
 
         for btn in self._btns:
             btn.draw(self.screen)
 
         # Right-side info
+        max_moves = self.game.stones_per_player * 2
         info = (
-            f"Move {self.game.move_count}/20     "
+            f"{self.bs}x{self.bs}  Move {self.game.move_count}/{max_moves}     "
             f"Capture bonus  X +{self.game.captured_by[PLAYER_X]}"
             f"   O +{self.game.captured_by[PLAYER_O]}"
         )
         inf_surf = self.F_SMALL.render(info, True, TEXT_MUT)
         self.screen.blit(
             inf_surf,
-            inf_surf.get_rect(right=WIN_W - 20, centery=FOOTER_Y + FOOTER_H // 2),
+            inf_surf.get_rect(right=WIN_W - 20, centery=fy + fh // 2),
         )
 
     # ── Rules overlay ─────────────────────────────────────────────────────────
+
+    # ── Advanced (AI Setup) overlay ──────────────────────────────────────────
+
+    def _build_advanced_buttons(self) -> None:
+        """Lay out clickable chips inside the AI Setup overlay."""
+        pw, ph = 620, 380
+        px = (WIN_W - pw) // 2
+        py = (WIN_H - ph) // 2
+        self._adv_overlay_rect = pygame.Rect(px, py, pw, ph)
+
+        # Row buttons per player: Native, 5×5, 6×6, 7×7 chips
+        self._adv_buttons = []
+        chip_w = 80
+        chip_h = 36
+        chip_gap = 12
+        labels = [("Native", None), ("5×5", 5), ("6×6", 6), ("7×7", 7)]
+
+        # X player chips
+        y_x = py + 110
+        x0 = px + 220
+        for i, (lbl, bs_val) in enumerate(labels):
+            rect = pygame.Rect(x0 + i * (chip_w + chip_gap), y_x, chip_w, chip_h)
+            color = COL_X
+            btn = _Btn(rect, lbl, color, TEXT_PRI, self.F_H2)
+            btn.bs_val = bs_val  # type: ignore[attr-defined]
+            btn.player = PLAYER_X  # type: ignore[attr-defined]
+            self._adv_buttons.append(btn)
+
+        # O player chips
+        y_o = py + 180
+        for i, (lbl, bs_val) in enumerate(labels):
+            rect = pygame.Rect(x0 + i * (chip_w + chip_gap), y_o, chip_w, chip_h)
+            btn = _Btn(rect, lbl, COL_O, TEXT_PRI, self.F_H2)
+            btn.bs_val = bs_val  # type: ignore[attr-defined]
+            btn.player = PLAYER_O  # type: ignore[attr-defined]
+            self._adv_buttons.append(btn)
+
+        # Apply / Reset / Close buttons
+        ab_y = py + ph - 56
+        self._adv_btn_reset = _Btn(
+            pygame.Rect(px + 60, ab_y, 130, 38), "Reset", TEXT_MUT, TEXT_PRI, self.F_H2,
+        )
+        self._adv_btn_apply = _Btn(
+            pygame.Rect(px + pw - 200, ab_y, 130, 38), "Apply", GOLD, TEXT_PRI, self.F_H2,
+        )
+
+    def _click_advanced(self, pos: tuple) -> None:
+        """Handle clicks while the AI Setup overlay is visible."""
+        # Click outside the overlay → close (cancel-style)
+        if not self._adv_overlay_rect.collidepoint(pos):
+            self.show_advanced = False
+            return
+
+        # Chip selection
+        for btn in self._adv_buttons:
+            if btn.hit(pos):
+                if btn.player == PLAYER_X:  # type: ignore[attr-defined]
+                    self.x_src_bs = btn.bs_val  # type: ignore[attr-defined]
+                else:
+                    self.o_src_bs = btn.bs_val  # type: ignore[attr-defined]
+                return
+
+        if self._adv_btn_reset.hit(pos):
+            self.x_src_bs = None
+            self.o_src_bs = None
+            return
+
+        if self._adv_btn_apply.hit(pos):
+            self.btn_diff_x.text = self._diff_x_lbl()
+            self.btn_diff_o.text = self._diff_o_lbl()
+            self.show_advanced = False
+            self._reset()
+            return
+
+    def _draw_advanced_overlay(self) -> None:
+        """Render the AI Setup modal: per-player model source chips."""
+        dim = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+        dim.fill((0, 0, 0, 170))
+        self.screen.blit(dim, (0, 0))
+
+        rect = self._adv_overlay_rect
+        _rrect(self.screen, PANEL_BG, rect, 16, 2, GOLD)
+        cx = WIN_W // 2
+
+        # Title
+        title = self.F_H1.render("AI Setup — Cross-Board Model Sources", True, TEXT_PRI)
+        self.screen.blit(title, title.get_rect(centerx=cx, y=rect.y + 22))
+
+        sub = self.F_SMALL.render(
+            f"Currently playing on {self.bs}×{self.bs} board. "
+            "Choose model source per player (Native = trained for current board).",
+            True, TEXT_MUT,
+        )
+        self.screen.blit(sub, sub.get_rect(centerx=cx, y=rect.y + 60))
+
+        # Row labels
+        for i, (label, src_bs, color) in enumerate([
+            ("Player X model:", self.x_src_bs, COL_X),
+            ("Player O model:", self.o_src_bs, COL_O),
+        ]):
+            y_row = rect.y + 110 + i * 70
+            lbl = self.F_H2.render(label, True, color)
+            self.screen.blit(lbl, (rect.x + 30, y_row + 8))
+
+        # Chip buttons with active highlight
+        for btn in self._adv_buttons:
+            cur = self.x_src_bs if btn.player == PLAYER_X else self.o_src_bs  # type: ignore[attr-defined]
+            is_active = (cur == btn.bs_val)  # type: ignore[attr-defined]
+            fill = btn.border if is_active else PANEL_BG
+            border = btn.border
+            _rrect(self.screen, fill, btn.rect, 8, 2, border)
+            txt_color = TEXT_PRI if is_active else btn.border
+            t = btn.font.render(btn.text, True, txt_color)
+            self.screen.blit(t, t.get_rect(center=btn.rect.center))
+
+        # Note about MCTS
+        note_lines = [
+            "Note: Cross-board agents use the resize adapter and run **without MCTS**",
+            "(pure neural-net policy). Native agents use full MCTS as configured.",
+        ]
+        for i, ln in enumerate(note_lines):
+            txt = self.F_SMALL.render(ln, True, TEXT_MUT)
+            self.screen.blit(txt, txt.get_rect(centerx=cx, y=rect.y + 250 + i * 22))
+
+        # Action buttons
+        for btn in (self._adv_btn_reset, self._adv_btn_apply):
+            _rrect(self.screen, PANEL_BG, btn.rect, 10, 2, btn.border)
+            t = btn.font.render(btn.text, True, btn.border)
+            self.screen.blit(t, t.get_rect(center=btn.rect.center))
 
     def _draw_rules_overlay(self) -> None:
         dim = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
@@ -612,14 +847,20 @@ class PygameGUI:
         self.screen.blit(title, title.get_rect(centerx=cx, y=y))
         y += 38
 
+        config = BOARD_CONFIGS.get(self.bs, {})
+        stones = config.get("stones_per_player", 10)
+        if self.bs % 2 == 1:
+            center_desc = "center 1 cell decides"
+        else:
+            center_desc = "center 4 cells decide"
         rows = [
-            ("Board",     "6 × 6 grid — two players, X (blue) and O (pink)"),
-            ("Stones",    "Each player places 10 stones — 20 moves total"),
-            ("Capture",   "A stone is removed when opponent neighbours ≥ 2"),
+            ("Board",     f"{self.bs} x {self.bs} grid — two players, X (blue) and O (pink)"),
+            ("Stones",    f"Each player places {stones} stones — {stones * 2} moves total"),
+            ("Capture",   "A stone is removed when opponent neighbours >= 2"),
             ("",          "AND outnumber its friendly neighbours"),
             ("Bonus",     "Each captured opponent stone = +1 score point"),
             ("Territory", "Empty cells scored by neighbour-stone majority"),
-            ("Tiebreak",  "If tied, center 4 cells decide — still tied = draw"),
+            ("Tiebreak",  f"If tied, {center_desc} — still tied = draw"),
             ("Goal",      "Highest territory + capture total wins"),
         ]
 
