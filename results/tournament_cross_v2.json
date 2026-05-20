@@ -1,0 +1,74 @@
+[
+  {
+    "board_size": 5,
+    "x_agent": "Hard-6\u21925",
+    "o_agent": "Hard-5(native)",
+    "games": 20,
+    "x_wins": 10,
+    "o_wins": 10,
+    "draws": 0,
+    "avg_x_score": 17.0,
+    "avg_o_score": 7.0,
+    "seconds": 25.0318820476532
+  },
+  {
+    "board_size": 5,
+    "x_agent": "Hard-7\u21925",
+    "o_agent": "Hard-5(native)",
+    "games": 20,
+    "x_wins": 10,
+    "o_wins": 10,
+    "draws": 0,
+    "avg_x_score": 5.0,
+    "avg_o_score": 11.0,
+    "seconds": 25.802757024765015
+  },
+  {
+    "board_size": 6,
+    "x_agent": "Hard-5\u21926",
+    "o_agent": "Hard-6(native)",
+    "games": 20,
+    "x_wins": 0,
+    "o_wins": 20,
+    "draws": 0,
+    "avg_x_score": 7.5,
+    "avg_o_score": 15.5,
+    "seconds": 40.662163972854614
+  },
+  {
+    "board_size": 6,
+    "x_agent": "Hard-7\u21926",
+    "o_agent": "Hard-6(native)",
+    "games": 20,
+    "x_wins": 0,
+    "o_wins": 20,
+    "draws": 0,
+    "avg_x_score": 4.5,
+    "avg_o_score": 19.0,
+    "seconds": 42.217324018478394
+  },
+  {
+    "board_size": 7,
+    "x_agent": "Hard-5\u21927",
+    "o_agent": "Hard-7(native)",
+    "games": 20,
+    "x_wins": 0,
+    "o_wins": 20,
+    "draws": 0,
+    "avg_x_score": 9.5,
+    "avg_o_score": 27.0,
+    "seconds": 69.79228115081787
+  },
+  {
+    "board_size": 7,
+    "x_agent": "Hard-6\u21927",
+    "o_agent": "Hard-7(native)",
+    "games": 20,
+    "x_wins": 10,
+    "o_wins": 10,
+    "draws": 0,
+    "avg_x_score": 14.5,
+    "avg_o_score": 21.5,
+    "seconds": 62.30907487869263
+  }
+]

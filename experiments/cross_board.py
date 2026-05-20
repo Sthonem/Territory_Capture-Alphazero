@@ -58,6 +58,7 @@ class CrossBoardAgent:
             board_size=model_board_size,
             channels=arch["channels"],
             num_blocks=arch["num_blocks"],
+            value_hidden=arch["value_hidden"],
         ).to(device)
         if model_path.exists():
             sd = torch.load(model_path, map_location=device)
@@ -119,26 +120,36 @@ def cross_board_tournament(
     games: int,
     sims_hard: int,
     repo_root: Path,
+    extended: bool = False,
+    minimax_depth: int = 3,
 ) -> list:
     """Run Hard-model cross-board matches.
 
-    For each pair (B_train, B_play) with B_train ≠ B_play in `boards`:
-       Hard-trained-on-B_train (via CrossBoardAgent) vs Hard-native-B_play
-       on a B_play board.
+    For each pair (B_train, B_play) with B_train ≠ B_play:
+       Hard-trained-on-B_train (CrossBoardAgent) vs native-B_play opponents.
+
+    Modes:
+      - default:  vs Hard-native only
+      - extended: also vs Random, Heuristic, Minimax, Medium-native
     """
-    from experiments.tournament import play_match  # late import to avoid cycle
+    from experiments.tournament import (
+        play_match, factory_random, factory_heuristic, factory_minimax,
+    )
 
     results = []
-    print(f"\n══════════ Cross-board tournament ══════════", flush=True)
+    print(f"\n══════════ Cross-board tournament "
+          f"({'EXTENDED' if extended else 'native only'}) ══════════", flush=True)
     for b_play in boards:
-        native_path = repo_root / "src" / f"model_hard_{b_play}x{b_play}.pth"
-        if not native_path.exists() and b_play == 6:
-            native_path = repo_root / "src" / "model_hard.pth"
-        if not native_path.exists():
+        native_hard = repo_root / "src" / f"model_hard_{b_play}x{b_play}.pth"
+        if not native_hard.exists() and b_play == 6:
+            native_hard = repo_root / "src" / "model_hard.pth"
+        native_med = repo_root / "src" / f"model_{b_play}x{b_play}.pth"
+        if not native_med.exists() and b_play == 6:
+            native_med = repo_root / "src" / "model.pth"
+        if not native_hard.exists():
             print(f"  ⚠ no native hard model for {b_play}×{b_play} — skip", flush=True)
             continue
 
-        # Native vs cross-board agents
         for b_train in boards:
             if b_train == b_play:
                 continue
@@ -146,22 +157,51 @@ def cross_board_tournament(
             if not train_path.exists() and b_train == 6:
                 train_path = repo_root / "src" / "model_hard.pth"
             if not train_path.exists():
-                print(f"  ⚠ no hard model for {b_train}×{b_train} — skip cross", flush=True)
                 continue
 
-            # cross_agent = Hard trained on b_train, playing on b_play
-            cross_factory = lambda b_train=b_train, b_play=b_play, p=str(train_path): \
-                CrossBoardAgent(model_board_size=b_train, play_board_size=b_play, model_path=p)
-            native_factory = lambda b_play=b_play, p=str(native_path), sims=sims_hard: \
-                AIAgent(board_size=b_play, model_path=p, num_simulations=sims)
-
+            cross_factory = (
+                lambda b_train=b_train, b_play=b_play, p=str(train_path):
+                    CrossBoardAgent(model_board_size=b_train,
+                                    play_board_size=b_play, model_path=p)
+            )
+            native_hard_factory = (
+                lambda b_play=b_play, p=str(native_hard), sims=sims_hard:
+                    AIAgent(board_size=b_play, model_path=p, num_simulations=sims)
+            )
             label_cross = f"Hard-{b_train}→{b_play}"
+
+            # ── Native Hard (always run) ──
             label_native = f"Hard-{b_play}(native)"
             print(f"  {label_cross} vs {label_native} ({games} games)...", flush=True)
-            r = play_match(b_play, cross_factory, native_factory,
+            r = play_match(b_play, cross_factory, native_hard_factory,
                            label_cross, label_native, games=games)
             results.append(r)
             print(f"    {label_cross}: {r.x_wins}/{games} ({r.x_win_rate*100:.0f}%) | "
                   f"{label_native}: {r.o_wins}/{games} ({r.o_win_rate*100:.0f}%) | "
                   f"D:{r.draws} | {r.seconds:.0f}s", flush=True)
+
+            if not extended:
+                continue
+
+            # ── Extended: vs Random, Heuristic, Minimax, Medium-native ──
+            opponents = [
+                ("Random",    factory_random()),
+                ("Heuristic", factory_heuristic()),
+                ("Minimax",   factory_minimax(depth=minimax_depth)),
+            ]
+            if native_med.exists():
+                native_med_factory = (
+                    lambda b_play=b_play, p=str(native_med), sims=sims_hard // 2:
+                        AIAgent(board_size=b_play, model_path=p, num_simulations=sims)
+                )
+                opponents.append((f"Medium-{b_play}(native)", native_med_factory))
+
+            for opp_label, opp_factory in opponents:
+                print(f"  {label_cross} vs {opp_label} ({games} games)...", flush=True)
+                r = play_match(b_play, cross_factory, opp_factory,
+                               label_cross, opp_label, games=games)
+                results.append(r)
+                print(f"    {label_cross}: {r.x_wins}/{games} ({r.x_win_rate*100:.0f}%) | "
+                      f"{opp_label}: {r.o_wins}/{games} | D:{r.draws} | "
+                      f"{r.seconds:.0f}s", flush=True)
     return results
